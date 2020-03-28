@@ -53,6 +53,8 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		break;
 	case CLOSE:
 		//this->syscall_close(syscallUUID, pid, param.param1_int);
+		removeFileDescriptor(pid, param.param1_int);
+		returnSystemCall(syscallUUID, 0);
 		break;
 	case READ:
 		//this->syscall_read(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
@@ -76,6 +78,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		//this->syscall_bind(syscallUUID, pid, param.param1_int,
 		//		static_cast<struct sockaddr *>(param.param2_ptr),
 		//		(socklen_t) param.param3_int);
+		returnSystemCall(syscallUUID, 0);
 		break;
 	case GETSOCKNAME:
 		//this->syscall_getsockname(syscallUUID, pid, param.param1_int,
