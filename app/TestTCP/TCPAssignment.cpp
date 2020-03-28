@@ -43,10 +43,13 @@ void TCPAssignment::finalize()
 
 void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallParameter& param)
 {
+	int fd;
 	switch(param.syscallNumber)
 	{
 	case SOCKET:
 		//this->syscall_socket(syscallUUID, pid, param.param1_int, param.param2_int);
+		fd = createFileDescriptor(pid);
+		returnSystemCall(syscallUUID, fd);
 		break;
 	case CLOSE:
 		//this->syscall_close(syscallUUID, pid, param.param1_int);
