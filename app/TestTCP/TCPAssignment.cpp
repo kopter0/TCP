@@ -13,9 +13,12 @@
 #include <E/Networking/E_Packet.hpp>
 #include <E/Networking/E_NetworkUtil.hpp>
 #include "TCPAssignment.hpp"
+#include "kensocket.cpp"
 
 namespace E
 {
+
+std::map<std::tuple<int, in_addr_t, in_port_t>, int> mymap;
 
 TCPAssignment::TCPAssignment(Host* host) : HostModule("TCP", host),
 		NetworkModule(this->getHostModuleName(), host->getNetworkSystem()),
@@ -33,7 +36,7 @@ TCPAssignment::~TCPAssignment()
 
 void TCPAssignment::initialize()
 {
-
+	kensocket::kref_kensock_map.clear();
 }
 
 void TCPAssignment::finalize()
@@ -44,6 +47,9 @@ void TCPAssignment::finalize()
 void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallParameter& param)
 {
 	int fd;
+	struct sockaddr_in *sa;
+	kensocket::kref temp_kref;
+	std::map<kensocket::kref, kensocket::kensock>::iterator it;
 	switch(param.syscallNumber)
 	{
 	case SOCKET:
@@ -54,6 +60,18 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 	case CLOSE:
 		//this->syscall_close(syscallUUID, pid, param.param1_int);
 		removeFileDescriptor(pid, param.param1_int);
+		
+		// it = kensocket::kref_kensock_map.begin();
+		// for (; it != kensocket::kref_kensock_map.end(); it++){
+
+		// 	// std::cout<< "it: " << it->first.k_fd << " " << it->first.k_addr << " " << it->first.k_port << std::endl;
+		// 	if (it->first.k_fd == param.param1_int){
+		// 		kensocket::kref_kensock_map.erase(it->first);
+				
+		// 		returnSystemCall(syscallUUID, 0);
+		// 	}
+
+		// }
 		returnSystemCall(syscallUUID, 0);
 		break;
 	case READ:
@@ -78,6 +96,24 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		//this->syscall_bind(syscallUUID, pid, param.param1_int,
 		//		static_cast<struct sockaddr *>(param.param2_ptr),
 		//		(socklen_t) param.param3_int);
+		sa = static_cast<struct sockaddr_in *> (param.param2_ptr);	
+		temp_kref = kensocket::kref(param.param1_int, sa->sin_addr.s_addr, sa->sin_port);
+		// std::cout << "temp_kerf:" <<param.param1_int << " " << sa->sin_addr.s_addr << " " <<sa->sin_port << std::endl;
+		it = kensocket::kref_kensock_map.begin();
+		for (; it != kensocket::kref_kensock_map.end(); it++){
+
+			// std::cout<< "it: " << it->first.k_fd << " " << it->first.k_addr << " " << it->first.k_port << std::endl;
+			if (it->first.k_fd == temp_kref.k_fd){
+				returnSystemCall(syscallUUID, -1);
+			}
+			if (it->first.k_addr == temp_kref.k_addr || it->first.k_addr == 0){
+				if (it->first.k_port == temp_kref.k_port || it->first.k_port == 0){
+					returnSystemCall(syscallUUID, -1);
+				}
+			}
+		}
+
+		kensocket::kref_kensock_map[temp_kref] = kensocket::kensock();
 		returnSystemCall(syscallUUID, 0);
 		break;
 	case GETSOCKNAME:
