@@ -13,12 +13,12 @@
 #include <E/Networking/E_Packet.hpp>
 #include <E/Networking/E_NetworkUtil.hpp>
 #include "TCPAssignment.hpp"
-#include "kensocket.cpp"
+#include "kensocket.hpp"
 
 namespace E
 {
 
-std::map<std::tuple<int, in_addr_t, in_port_t>, int> mymap;
+kensocket kensock;
 
 TCPAssignment::TCPAssignment(Host* host) : HostModule("TCP", host),
 		NetworkModule(this->getHostModuleName(), host->getNetworkSystem()),
@@ -36,43 +36,47 @@ TCPAssignment::~TCPAssignment()
 
 void TCPAssignment::initialize()
 {
-	kensocket::kref_kensock_map.clear();
+	kensock = kensocket();
 }
 
 void TCPAssignment::finalize()
 {
-
+	
 }
 
 void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallParameter& param)
 {
 	int fd;
 	struct sockaddr_in *sa;
-	kensocket::kref temp_kref;
-	std::map<kensocket::kref, kensocket::kensock>::iterator it;
+	kensocket::kensockaddr t_kensockaddr;
+	kensocket::k_set_itr itr;
 	switch(param.syscallNumber)
 	{
 	case SOCKET:
 		//this->syscall_socket(syscallUUID, pid, param.param1_int, param.param2_int);
 		fd = createFileDescriptor(pid);
+		kensock.insert(mt(fd, 0, 0), kensocket::unallocated);
 		returnSystemCall(syscallUUID, fd);
 		break;
 	case CLOSE:
 		//this->syscall_close(syscallUUID, pid, param.param1_int);
-		removeFileDescriptor(pid, param.param1_int);
-		
-		// it = kensocket::kref_kensock_map.begin();
-		// for (; it != kensocket::kref_kensock_map.end(); it++){
+		fd = param.param1_int;
+		itr = kensock.find_by_fd(fd, kensocket::allocated);
 
-		// 	// std::cout<< "it: " << it->first.k_fd << " " << it->first.k_addr << " " << it->first.k_port << std::endl;
-		// 	if (it->first.k_fd == param.param1_int){
-		// 		kensocket::kref_kensock_map.erase(it->first);
-				
-		// 		returnSystemCall(syscallUUID, 0);
-		// 	}
-
-		// }
-		returnSystemCall(syscallUUID, 0);
+		if ( itr != kensock.end(kensocket::allocated)){
+			kensock.erase(itr, kensocket::allocated);
+			removeFileDescriptor(pid, fd);
+			returnSystemCall(syscallUUID, 0);
+			break;
+		}
+		itr = kensock.find_by_fd(fd, kensocket::unallocated);
+		if(itr != kensock.end(kensocket::unallocated)){
+			kensock.erase(itr, kensocket::unallocated);
+			removeFileDescriptor(pid, fd);
+			returnSystemCall(syscallUUID, 0);
+			break;
+		}
+		returnSystemCall(syscallUUID, -1);
 		break;
 	case READ:
 		//this->syscall_read(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
@@ -96,30 +100,39 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		//this->syscall_bind(syscallUUID, pid, param.param1_int,
 		//		static_cast<struct sockaddr *>(param.param2_ptr),
 		//		(socklen_t) param.param3_int);
+		fd = param.param1_int;
 		sa = static_cast<struct sockaddr_in *> (param.param2_ptr);	
-		temp_kref = kensocket::kref(param.param1_int, sa->sin_addr.s_addr, sa->sin_port);
-		// std::cout << "temp_kerf:" <<param.param1_int << " " << sa->sin_addr.s_addr << " " <<sa->sin_port << std::endl;
-		it = kensocket::kref_kensock_map.begin();
-		for (; it != kensocket::kref_kensock_map.end(); it++){
-
-			// std::cout<< "it: " << it->first.k_fd << " " << it->first.k_addr << " " << it->first.k_port << std::endl;
-			if (it->first.k_fd == temp_kref.k_fd){
-				returnSystemCall(syscallUUID, -1);
-			}
-			if (it->first.k_addr == temp_kref.k_addr || it->first.k_addr == 0){
-				if (it->first.k_port == temp_kref.k_port || it->first.k_port == 0){
-					returnSystemCall(syscallUUID, -1);
-				}
-			}
+		t_kensockaddr = mt(fd, sa->sin_addr.s_addr, sa->sin_port);
+		if (kensock.find(t_kensockaddr, kensocket::allocated) != kensock.end(kensocket::allocated)){
+			returnSystemCall(syscallUUID, -1);
+			break;
 		}
-
-		kensocket::kref_kensock_map[temp_kref] = kensocket::kensock();
+		itr = kensock.find_by_fd(fd, kensocket::unallocated);
+		if (itr == kensock.end(kensocket::unallocated)){
+			returnSystemCall(syscallUUID, -1);
+			break;			
+		}
+		kensock.erase(itr, kensocket::unallocated);
+		kensock.insert(t_kensockaddr, kensocket::allocated);
 		returnSystemCall(syscallUUID, 0);
 		break;
 	case GETSOCKNAME:
 		//this->syscall_getsockname(syscallUUID, pid, param.param1_int,
 		//		static_cast<struct sockaddr *>(param.param2_ptr),
 		//		static_cast<socklen_t*>(param.param3_ptr));
+		fd = param.param1_int;
+		sa = static_cast<struct sockaddr_in *> (param.param2_ptr);
+
+		itr = kensock.find_by_fd(fd, kensocket::allocated);
+		if (itr == kensock.end(kensocket::allocated)){
+			returnSystemCall(syscallUUID, -1);
+			break;
+		}
+		sa->sin_addr.s_addr = t_second(*itr);
+		sa->sin_family = AF_INET;
+		sa->sin_port = t_third(*itr);
+		memset(sa->sin_zero, 0, 8); 
+		returnSystemCall(syscallUUID, 0);
 		break;
 	case GETPEERNAME:
 		//this->syscall_getpeername(syscallUUID, pid, param.param1_int,

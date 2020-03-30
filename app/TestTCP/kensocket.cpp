@@ -1,46 +1,45 @@
-#include<bits/stdc++.h>
-#include<arpa/inet.h>
-namespace kensocket{
+#include "kensocket.hpp"
+kensocket::kensocket(){
+    allocated_addrs.clear();
+    unallocated_addrs.clear();
+    k_sets_map[allocated] = allocated_addrs;
+    k_sets_map[unallocated] = unallocated_addrs;
+}
 
-
-    class kref{
-    public:
-        int k_fd;
-        in_addr_t k_addr;
-        in_port_t k_port;
-
-        kref():
-            k_fd(-1), k_addr(-1), k_port(-1){}
-        kref(int fd, in_addr_t addr, in_port_t port):
-            k_fd(fd), k_addr(addr), k_port(port)
-        {}
-
-        // bool operator< (const kref& rhs){
-        //     if (this -> k_fd < rhs.k_fd)
-        //         return true;
-        //     return false;
-        // }
-
-        // bool operator() (kref const& lhs, kref const& rhs) const{
-        //     return (lhs.k_fd < rhs.k_fd);
-        // }
-    };
-
-    class kensock{
-    public:
-        kensock(){}
-    };
-
-
-    struct krefComparator{
-        bool operator() (const kref & lhs, const kref & rhs){
-            return (lhs.k_fd < rhs.k_fd);
+kensocket::k_set_itr kensocket::find_by_fd(int fd, k_set_type set_type){
+    k_set_itr ret = k_sets_map[set_type].begin();
+    for (;ret != k_sets_map[set_type].end(); ret++){
+        if (t_first(*ret) == fd){
+            break;
         }
-    };
-    static std::map<kref, kensock, krefComparator> kref_kensock_map;
+    }
+    return ret;
+}
 
-    // static void init_map(){
-    //     std::map<int, kref> kref_kensock_map = new std::map<int , kref>();
-    // }
+kensocket::k_set_itr kensocket::find(kensockaddr k_addr, k_set_type set_type){
+    k_set_itr ret = k_sets_map[set_type].begin();
+    for (;ret != k_sets_map[set_type].end(); ret++){
+        if (t_first(*ret) == t_first(k_addr)){
+            break;
+        }
 
+        if (t_second(*ret) == t_second(k_addr) || t_second(*ret) == 0){
+            if (t_third(*ret) == t_third(k_addr) || t_third(*ret) == 0){
+                break;
+            }
+        }
+    }
+    return ret;
+}  
+
+void kensocket::insert(kensockaddr k_addr, k_set_type set_type){
+    k_sets_map[set_type].insert(k_addr);
+}
+
+void kensocket::erase(k_set_itr itr, k_set_type set_type){
+    k_sets_map[set_type].erase(itr);
+}
+
+kensocket::k_set_itr kensocket::end(k_set_type set_type){
+    return k_sets_map[set_type].end();
 }
