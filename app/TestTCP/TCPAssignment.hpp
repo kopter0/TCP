@@ -130,18 +130,22 @@ public:
         std::deque<Connection *> *estab_queue;
         socket_state state;
         uint64_t uuid, timer_uuid, write_uuid, read_uuid;
-        int pid;
+        std::map<int, std::pair<uint64_t, Packet*>> timers_map;
+        std::set<int> not_acked_pckts;
+        int pid, recw, conw;
         in_port_t local_port, remote_port;
         bool bound, read_request, write_request, write_in_process;
         MyBuffer *read_buffer, *write_buffer; 
         Connection(){
-            fd = local_ip = remote_ip = send_isn = recv_isn = local_port = remote_port = backlog = backlog_used = 0;
+            fd = local_ip = remote_ip = send_isn = recv_isn = local_port = remote_port = backlog = backlog_used = recw = conw = 0;
             uuid = timer_uuid = write_uuid = read_uuid = 0;
 			pid = -1;
             state = CLOSED_SOCKET;  
             bound = write_request = read_request = write_in_process = false;
             read_buffer = new MyBuffer();
             write_buffer = new MyBuffer();
+            not_acked_pckts = std::set<int>();
+            timers_map = std::map<int, std::pair<uint64_t, Packet*>>();
         }
         ~Connection(){
         }
@@ -190,7 +194,9 @@ public:
 
     // Quick Packets
     inline void sendTCPSegment(Connection *con, std::vector<FLAGS> flags);
+    inline void sendTCPSegment(Connection *con, char *payload, int payload_size, std::vector<FLAGS> flags);
     inline void sendRST(Connection* con);
+    void disable_timers_until(Connection* con, uint64_t last);
 
     // Connection vector managment
 	void print_kensock_conns(std::vector<Connection*> con_v);
@@ -202,6 +208,7 @@ public:
     Conn_itr find_by_port_ip(Connection* k_con, socket_state sock_state);
     Conn_itr find_by_lr_port_ip(Connection* k_con, socket_state sock_state);
     Conn_itr find_by_lr_port_ip(Connection* k_con);
+    void do_write(Connection* itr);
 
 protected:
 	virtual void systemCallback(UUID syscallUUID, int pid, const SystemCallParameter& param) final;
