@@ -80,7 +80,7 @@ public:
             start = end = 0;
         }
         int get(char *tobuffer, int to_get){
-            int available = end - start;
+            int available = MAXBUFFERSIZE - end + start;
             available = (available < 0) ? MAXBUFFERSIZE + available : available;
             int actual_get = std::min(to_get, available);
 
@@ -97,14 +97,15 @@ public:
             return actual_get;
         }
         int put(char *frombuffer, int to_put){
-            int available = end - start;
+            int available = MAXBUFFERSIZE - end + start;
             available = (available < 0) ? MAXBUFFERSIZE + available : available;
-            int actual_put = std::max(to_put, available);
+            int actual_put = std::min(to_put, available);
 
+            std::cout << "start: " << start << " end: " << end << " to_put: " << to_put << std::endl;
+            
             if (end + actual_put < MAXBUFFERSIZE){
                 memcpy(buffer + end, frombuffer, actual_put);
-                end += actual_put;
-                end %= MAXBUFFERSIZE; 
+                end += actual_put; 
             }
 
             else {
@@ -113,6 +114,7 @@ public:
                 memcpy(buffer, frombuffer, second_phase);
                 end = second_phase;
             }
+            std::cout << "put succes" << std::endl;
             return actual_put;
         }
         int size(){
@@ -183,7 +185,7 @@ public:
 
 	TCPAssignment(Host* host);
 	virtual void initialize();
-	void construct_tcpheader(Packet * pkt, Connection *con, std::vector<FLAGS> flags);
+	void construct_tcpheader(Packet * pkt, Connection *con, std::vector<FLAGS> flags, int payload_size);
 	uint16_t set_flags(std::vector <FLAGS> fl, int length);
 	std::vector<FLAGS> get_flags(short flags);
 	void print_packet(Packet *pkt);

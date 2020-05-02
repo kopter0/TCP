@@ -110,13 +110,16 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 
 	case READ:
 		//this->syscall_read(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
+		std::cout << "read" << std::endl;
 		break;
 	case WRITE:
 		//this->syscall_write(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
+		std::cout << "write" << std::endl;
 		itr = find_by_fd(param.param1_int, pid);
 		temp_int = (*itr) -> write_buffer -> put((char*)param.param2_ptr, param.param3_int);
 		returnSystemCall(syscallUUID, temp_int);
 		if (!(*itr) -> write_in_process){
+			std::cout << 0 << std::endl;
 			do_write(*itr);
 		}
 		break;
@@ -378,7 +381,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			flag_map[fl] = true;
 		}
 		
-		// printPack(packet, flag_vector);
+		printPack(packet, flag_vector);
 		// SYN ACK signal
 		if (flag_map[SYN] && flag_map[ACK]){
 			this-> freePacket(packet);
@@ -622,7 +625,7 @@ std::vector<TCPAssignment::FLAGS> TCPAssignment::get_flags(short flags){
 	return vect;
 }
 
-void TCPAssignment::construct_tcpheader(Packet * pkt, Connection *con, std::vector<FLAGS> flags){
+void TCPAssignment::construct_tcpheader(Packet * pkt, Connection *con, std::vector<FLAGS> flags, int payload_size){
 		
 		// pkt->clearContext();
 		uint32_t li = htonl(con -> remote_ip);
@@ -649,7 +652,7 @@ void TCPAssignment::construct_tcpheader(Packet * pkt, Connection *con, std::vect
 		u_char tcpeheader[20];
 		pkt -> readData(34, tcpeheader, 20);
 		
-		uint16_t chec = NetworkUtil::tcp_sum(htonl(con -> local_ip), htonl(con -> remote_ip) ,tcpeheader, 20);
+		uint16_t chec = NetworkUtil::tcp_sum(htonl(con -> local_ip), htonl(con -> remote_ip) ,tcpeheader, 20 + payload_size);
 		chec = ~chec;
 		chec = htons(chec);
 		pkt -> writeData(50, &chec, 2);
@@ -658,17 +661,17 @@ void TCPAssignment::construct_tcpheader(Packet * pkt, Connection *con, std::vect
 inline void TCPAssignment::sendTCPSegment(Connection *con, std::vector<FLAGS> flags){
 	// Sends only header now
 	Packet *pck = this -> allocatePacket(54);
-	construct_tcpheader(pck, con, flags);
+	construct_tcpheader(pck, con, flags, 0);
 	this -> sendPacket("IPv4", pck);
 }
 
 inline void TCPAssignment::sendTCPSegment(Connection *con, char* payload, int payload_size, std::vector<FLAGS> flags){
 	Packet *pck = this -> allocatePacket(54 + payload_size);
 	memcpy(pck + 54, payload, payload_size);
-	construct_tcpheader(pck, con, flags);
+	construct_tcpheader(pck, con, flags, payload_size);
 	con -> send_isn += payload_size;
-	Packet* pck_copy = this -> clonePacket(pck);
-	con -> timers_map.insert({con-> send_isn, {this -> addTimer(pck_copy, 60), pck_copy}});
+	// Packet* pck_copy = this -> clonePacket(pck);
+	// con -> timers_map.insert({con-> send_isn, {this -> addTimer(pck_copy, 60), pck_copy}});
 	this -> sendPacket("IPv4", pck);
 }
 
@@ -693,8 +696,8 @@ void TCPAssignment::disable_timers_until(Connection *con, uint64_t last){
 
 void TCPAssignment::do_write(Connection* con){
 	con -> write_in_process = true;
-	while (con -> write_buffer -> size() > 0){
-		int to_fetch = std::min(512, con -> recw);
+	while ((con -> write_buffer -> size()) > 0){
+		int to_fetch = std::min(512, 512);
 		char *payload = (char*)malloc(to_fetch);
 		int actual_size = con -> write_buffer -> get(payload, to_fetch);
 		sendTCPSegment(con, payload, actual_size, std::vector<FLAGS>{ACK});
