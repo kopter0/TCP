@@ -56,7 +56,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 	std::vector<Connection*>::iterator itr;
 	std::vector <FLAGS> fl;
 
-	int inter_index;
+	int inter_index, temp_int;
 	uint8_t my_ip_1byte[4] = {0};
 	uint32_t dest_ip, my_ip;
 	const uint8_t *dest_ptr;
@@ -113,6 +113,12 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		break;
 	case WRITE:
 		//this->syscall_write(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
+		itr = find_by_fd(param.param1_int, pid);
+		temp_int = (*itr) -> write_buffer -> put((char*)param.param2_ptr, param.param3_int);
+		returnSystemCall(syscallUUID, temp_int);
+		if (!(*itr) -> write_in_process){
+
+		}
 		break;
 	case CONNECT:
 		//this->syscall_connect(syscallUUID, pid, param.param1_int,

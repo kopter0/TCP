@@ -70,58 +70,15 @@ public:
         
     };
     
-
-	struct Connection{
-        uint fd;
-        in_addr_t local_ip, remote_ip;
-        uint send_isn, recv_isn, backlog, backlog_used;
-        std::deque<std::tuple<uint64_t, int, void*>> *accept_queue;
-        std::deque<Connection *> *estab_queue;
-        socket_state state;
-        uint64_t uuid, timer_uuid;
-        int pid;
-        in_port_t local_port, remote_port;
-        bool bound; 
-        Connection(){
-            fd = local_ip = remote_ip = send_isn = recv_isn = local_port = remote_port = backlog = backlog_used = pid = uuid = timer_uuid = 0;
-			pid = -1;
-            state = CLOSED_SOCKET;  
-            bound = false;
-        }
-        ~Connection(){
-        }
-
-        friend bool operator<(const Connection & lhs, const Connection & rhs){
-            return (lhs.fd < rhs.fd);
-        }
-
-        void operator=(const Connection & other){
-            fd = other.fd;
-            local_ip = other.local_ip;
-            remote_ip = other.remote_ip;
-            send_isn = other.send_isn;
-            recv_isn = other.recv_isn;
-            local_port = other.local_port;
-            remote_port = other.remote_port;
-            state = other.state;
-            bound = other.bound;
-            backlog = other.backlog;
-            backlog_used = other.backlog_used;
-            pid = other.pid;
-            uuid = other.uuid;
-            timer_uuid = other.timer_uuid;
-        }
-    };
-
-    #define MAXBUFFERSIZE 51200 
+        #define MAXBUFFERSIZE 51200 
     class MyBuffer{
         char buffer[MAXBUFFERSIZE];
         int start, end; // range [0, bufsize - 1]
 
+    public:
         MyBuffer(){
             start = end = 0;
         }
-    public:
         int get(char *tobuffer, int to_get){
             int available = end - start;
             available = (available < 0) ? MAXBUFFERSIZE + available : available;
@@ -158,7 +115,59 @@ public:
             }
             return actual_put;
         }
+        int size(){
+            int size = end - start;
+            size = (size < 0) ? size + MAXBUFFERSIZE : size;
+            return size;
+        }
     };
+
+	struct Connection{
+        uint fd;
+        in_addr_t local_ip, remote_ip;
+        uint send_isn, recv_isn, backlog, backlog_used;
+        std::deque<std::tuple<uint64_t, int, void*>> *accept_queue;
+        std::deque<Connection *> *estab_queue;
+        socket_state state;
+        uint64_t uuid, timer_uuid, write_uuid, read_uuid;
+        int pid;
+        in_port_t local_port, remote_port;
+        bool bound, read_request, write_request, write_in_process;
+        MyBuffer *read_buffer, *write_buffer; 
+        Connection(){
+            fd = local_ip = remote_ip = send_isn = recv_isn = local_port = remote_port = backlog = backlog_used = 0;
+            uuid = timer_uuid = write_uuid = read_uuid = 0;
+			pid = -1;
+            state = CLOSED_SOCKET;  
+            bound = write_request = read_request = write_in_process = false;
+            read_buffer = new MyBuffer();
+            write_buffer = new MyBuffer();
+        }
+        ~Connection(){
+        }
+
+        friend bool operator<(const Connection & lhs, const Connection & rhs){
+            return (lhs.fd < rhs.fd);
+        }
+
+        void operator=(const Connection & other){
+            fd = other.fd;
+            local_ip = other.local_ip;
+            remote_ip = other.remote_ip;
+            send_isn = other.send_isn;
+            recv_isn = other.recv_isn;
+            local_port = other.local_port;
+            remote_port = other.remote_port;
+            state = other.state;
+            bound = other.bound;
+            backlog = other.backlog;
+            backlog_used = other.backlog_used;
+            pid = other.pid;
+            uuid = other.uuid;
+            timer_uuid = other.timer_uuid;
+        }
+    };
+
 
 
 	#define Conn_itr std::vector<TCPAssignment::Connection*>::iterator
