@@ -49,6 +49,7 @@ void TCPAssignment::finalize()
 void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallParameter& param)
 {
 	uint fd;
+	char *buffer;
 	struct sockaddr_in *sa;
 	Connection *t_connection;
 	//Conn_itr itr;
@@ -110,6 +111,14 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 
 	case READ:
 		//this->syscall_read(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
+		fd = param.param1_int;
+		itr = find_by_fd(fd, pid);
+		if (itr == connection_vector.end()){
+			returnSystemCall(syscallUUID, -1);
+			break;
+		}
+
+
 		break;
 	case WRITE:
 		//this->syscall_write(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
@@ -337,7 +346,9 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 	if (fromModule.compare("IPv4") == 0){
 		Conn_itr itr, itr1;
 		short flags;
-
+		uint rec_window;
+		uint16_t checksum;
+		ssize_t payload_size;
 		Connection* in_con = new Connection();
 		packet -> readData(OFFSET_FLAGS, &flags, 2);
 		packet -> readData(OFFSET_DST_IP, &(in_con -> local_ip), 4);
@@ -346,8 +357,24 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		packet -> readData(OFFSET_SRC_PORT, &(in_con->remote_port), 2);
 		packet -> readData(OFFSET_SEQ_NUM, &(in_con -> recv_isn), 4);
 		packet -> readData(OFFSET_ACK_NUM, &(in_con -> send_isn), 4);
-		// add length detector
+		packet -> readData(OFFSET_REC_WNDW, &rec_window, 2);
+		payload_size = packet -> getSize();
+		payload_size -= 54; // - header size
+		
+		//tcp checksum checking; discard if not correct
+		char tcp_segment_temp[payload_size + 20];
+		packet -> readData(OFFSET_SRC_PORT, tcp_segment_temp, payload_size + 20);
+		checksum = NetworkUtil::tcp_sum((in_con -> remote_ip),(in_con -> local_ip),(const uint16_t*)tcp_segment_temp, payload_size + 20);
+		checksum = ~checksum;
+		if (checksum != 0){
+			this->freePacket(packet);
+			return;
 
+		}
+		char payload[payload_size];
+		memcpy((void*)payload, (const void *)(tcp_segment_temp + 20),payload_size );
+		// add length detector
+		
 		in_con -> local_ip = ntohl(in_con -> local_ip);
 		in_con -> local_port = ntohs(in_con -> local_port);
 		in_con -> remote_ip = ntohl(in_con -> remote_ip);
@@ -377,7 +404,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				(*itr)->state = ESTAB_SOCKET;
 				(*itr)->recv_isn = in_con->recv_isn + 1;
 				// (*itr)->send_isn = in_con->send_isn;
-				(*itr) -> send_isn++;	
+				(*itr) -> send_isn++;
+				
 				sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
 				free(in_con);
 				return;
@@ -444,10 +472,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 				(*itr) -> state = SYN_RCVD_SOCKET;
 				(*itr) -> recv_isn = in_con -> recv_isn + 1;
-				(*itr) -> send_isn--;			
+				(*itr) -> send_isn--;
+				(*itr) -> sim_connect = true; 			
 				sendTCPSegment((*itr), std::vector<FLAGS>{SYN, ACK});
 				return;	
-
 			}
 
 			itr = find_by_port_ip(in_con, LISTEN_SOCKET);
@@ -479,11 +507,31 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			// sim connect
 			itr = find_by_lr_port_ip(in_con, ESTAB_SOCKET);
 			if (itr != connection_vector.end() ){
-				// (*itr)->recv_isn++;
-				// (*itr)->send_isn = in_con->send_isn;
-				returnSystemCall((*itr)->uuid, 0 );
-				free(in_con);
+				
+				if (payload_size > 0){
+					
+					(*itr)->read_buffer->put(payload, payload_size);
+					
+
+
+
+
+
+				}				
+				// 1 case sim connect
+				
+				if ((*itr)->sim_connect == true){
+
+					returnSystemCall((*itr)->uuid, 0 );
+					free(in_con);
+				
+
+
+				}
 				return;
+				// 2 case read call 
+
+				// 3 case write's ack
 			}
 			
 			itr = find_by_lr_port_ip(in_con, LAST_ACK_SOCKET);
@@ -642,6 +690,18 @@ inline void TCPAssignment::sendTCPSegment(Connection *con, std::vector<FLAGS> fl
 	construct_tcpheader(pck, con, flags);
 	this -> sendPacket("IPv4", pck);
 }
+
+// void TCPAssignment::next_seq_ack(Connection *itr,Connection *in_con, uint16_t payload_size, uint16_t &next_seq,uint16_t &next_ack){
+
+// 	// make the out of order packets work
+
+
+
+
+
+
+// }
+
 
 inline void TCPAssignment::sendRST(Connection *con){
 	sendTCPSegment(con, std::vector<FLAGS>{RST});
@@ -816,6 +876,29 @@ void TCPAssignment::print_kensock_conns( std::vector<Connection*> con_v ){
 
 
 #pragma endregion Vector Interactions
+
+#pragma region ReadBuffer
+
+
+void E::TCPAssignment::insert_packet_readbuffer(uint32_t seq,uint32_t ack, uint32_t length, char *payload, TCPAssignment::ReadBuffer rb){
+	
+	if (rb.expected_seq() == seq){
+		rb.insert_inorder(seq, ack, length, payload);
+		rb.check_ooo_packets();
+		return;
+	}
+	else if (seq < rb.expected_seq() ){
+		
+
+
+	}
+
+
+}	
+
+
+#pragma endregion ReadBuffer
+
 
 
 }
