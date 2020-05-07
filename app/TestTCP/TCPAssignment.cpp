@@ -87,6 +87,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		}
 
 		if ((*itr)->state == ESTAB_SOCKET){
+			break;
 			sendTCPSegment((*itr), std::vector<FLAGS>{FIN, ACK});
 			(*itr) -> send_isn++;
 			(*itr) -> state = FIN_WAIT_1_SOCKET;
@@ -107,21 +108,29 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 			returnSystemCall(syscallUUID, 0);
 		}
 		
-
+		break;
 	case READ:
 		//this->syscall_read(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
 		std::cout << "read" << std::endl;
 		break;
 	case WRITE:
 		//this->syscall_write(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
-		std::cout << "write" << std::endl;
+		// std::cout << "write" << std::endl;
 		itr = find_by_fd(param.param1_int, pid);
-		temp_int = (*itr) -> write_buffer -> put((char*)param.param2_ptr, param.param3_int);
-		returnSystemCall(syscallUUID, temp_int);
+		
+		if ((*itr) -> write_buffer -> available() > 0){
+			temp_int = (*itr) -> write_buffer -> put((char*)param.param2_ptr, param.param3_int);
+			returnSystemCall(syscallUUID, temp_int);
+		}
+		else {
+			(*itr) -> write_requested = true;
+			(*itr) -> write_request = std::make_tuple(syscallUUID, param.param2_ptr, param.param3_int);
+		}
+
 		if (!(*itr) -> write_in_process){
-			std::cout << 0 << std::endl;
 			do_write(*itr);
 		}
+		
 		break;
 	case CONNECT:
 		//this->syscall_connect(syscallUUID, pid, param.param1_int,
@@ -351,7 +360,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 {	
 	if (fromModule.compare("IPv4") == 0){
 		Conn_itr itr, itr1;
-		short flags;
+		unsigned short flags, recw;
 
 		Connection* in_con = new Connection();
 		packet -> readData(OFFSET_FLAGS, &flags, 2);
@@ -361,6 +370,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		packet -> readData(OFFSET_SRC_PORT, &(in_con->remote_port), 2);
 		packet -> readData(OFFSET_SEQ_NUM, &(in_con -> recv_isn), 4);
 		packet -> readData(OFFSET_ACK_NUM, &(in_con -> send_isn), 4);
+		packet -> readData(48, &recw, 2);
 		// add length detector
 
 		in_con -> local_ip = ntohl(in_con -> local_ip);
@@ -370,7 +380,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		in_con -> recv_isn = ntohl(in_con -> recv_isn);
 		in_con -> send_isn = ntohl(in_con -> send_isn);
 
-
+		recw = ntohs(recw);
 		flags = ntohs(flags);
 		std::vector<FLAGS> flag_vector = get_flags(flags);
 		flag_map.clear();
@@ -380,8 +390,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		for (FLAGS fl: flag_vector){
 			flag_map[fl] = true;
 		}
-		
-		printPack(packet, flag_vector);
+		// printPack(packet, flag_vector);
 		// SYN ACK signal
 		if (flag_map[SYN] && flag_map[ACK]){
 			this-> freePacket(packet);
@@ -482,6 +491,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			in_con -> pid = (*itr) -> pid;
 			in_con -> send_isn = rand();
 			in_con -> recv_isn++;
+			in_con -> recw = recw;
 			connection_vector.push_back(in_con);
 			sendTCPSegment(in_con, std::vector<FLAGS>{SYN, ACK});
 			in_con -> send_isn++;
@@ -489,14 +499,35 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		// ACK
 		else if (flag_map[ACK])
 		{
-			this -> freePacket(packet);
+			
 			// sim connect
 			itr = find_by_lr_port_ip(in_con);
 
 			if (itr != connection_vector.end()){
+				// if ((*itr) -> state == ESTAB_SOCKET){
+				// 	returnSystemCall((*itr)->uuid, 0 );
+				// }
+
 				if ((*itr) -> state == ESTAB_SOCKET){
-					returnSystemCall((*itr)->uuid, 0 );
+					auto to_ack = &((*itr) -> not_acked_pckts);
+					if (to_ack -> size() > 0){
+						int acked = in_con -> send_isn;
+						auto ack_itr = std::lower_bound(to_ack -> begin(), to_ack -> end(), acked);
+						(*itr) -> max_allowed_packets += (ack_itr - to_ack -> begin());
+						to_ack -> erase(to_ack -> begin(), ack_itr);
+						// std::cout << "Acked: " << acked << " left: " << (*itr) -> not_acked_pckts.size() << std::endl;
+						if (to_ack -> size() == 0){
+							(*itr) -> byte_in_flight = 0;
+							do_write((*itr));
+							// std::cout << "sdfds" << std::endl;
+						}
+					}
+					else {
+						returnSystemCall((*itr)->uuid, 0 );
+					}
 				}
+				
+				
 
 				if ((*itr) -> state == LAST_ACK_SOCKET){
 					uint64_t uuid_temp = (*itr)->uuid;
@@ -508,6 +539,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					Connection *t_connection = (*itr);
 					t_connection -> state = ESTAB_SOCKET;
 					itr = find_by_fd(t_connection -> fd, t_connection -> pid, LISTEN_SOCKET);
+					t_connection -> recw = recw;
 
 					if ( (*itr) -> accept_queue -> size() > 0){
 						std::tuple<uint64_t, int, void*> tup = (*itr) -> accept_queue -> front();
@@ -524,6 +556,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 						memset(sockad -> sin_zero, 0, 8);
 
 						returnSystemCall((UUID)std::get<0>(tup), new_fd);
+
 					}
 					else{
 						(*itr) -> estab_queue -> push_back(t_connection);
@@ -540,6 +573,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 				free(in_con);
 			}
+			
+			this -> freePacket(packet);
 		}
 		// std::cout << "Sent" << std::endl;
 	}
@@ -649,10 +684,10 @@ void TCPAssignment::construct_tcpheader(Packet * pkt, Connection *con, std::vect
 		fl = htons(0xc800);
 		pkt -> writeData(48, &fl, 2);
 		
-		u_char tcpeheader[20];
-		pkt -> readData(34, tcpeheader, 20);
+		u_char tcpsegment[20 + payload_size];
+		pkt -> readData(34, tcpsegment, 20 + payload_size);
 		
-		uint16_t chec = NetworkUtil::tcp_sum(htonl(con -> local_ip), htonl(con -> remote_ip) ,tcpeheader, 20 + payload_size);
+		uint16_t chec = NetworkUtil::tcp_sum(htonl(con -> local_ip), htonl(con -> remote_ip) ,tcpsegment, 20 + payload_size);
 		chec = ~chec;
 		chec = htons(chec);
 		pkt -> writeData(50, &chec, 2);
@@ -667,8 +702,10 @@ inline void TCPAssignment::sendTCPSegment(Connection *con, std::vector<FLAGS> fl
 
 inline void TCPAssignment::sendTCPSegment(Connection *con, char* payload, int payload_size, std::vector<FLAGS> flags){
 	Packet *pck = this -> allocatePacket(54 + payload_size);
-	memcpy(pck + 54, payload, payload_size);
+	
+	pck -> writeData(54, payload, payload_size);
 	construct_tcpheader(pck, con, flags, payload_size);
+	con -> not_acked_pckts.push_back(con -> send_isn);
 	con -> send_isn += payload_size;
 	// Packet* pck_copy = this -> clonePacket(pck);
 	// con -> timers_map.insert({con-> send_isn, {this -> addTimer(pck_copy, 60), pck_copy}});
@@ -696,13 +733,34 @@ void TCPAssignment::disable_timers_until(Connection *con, uint64_t last){
 
 void TCPAssignment::do_write(Connection* con){
 	con -> write_in_process = true;
-	while ((con -> write_buffer -> size()) > 0){
-		int to_fetch = std::min(512, 512);
-		char *payload = (char*)malloc(to_fetch);
-		int actual_size = con -> write_buffer -> get(payload, to_fetch);
-		sendTCPSegment(con, payload, actual_size, std::vector<FLAGS>{ACK});
-		free(payload);
+	int total_sent = 0, total_size = 0;
+	while (con -> write_buffer -> get_size() > 0){
+		if ((con -> not_acked_pckts.size() < con -> max_allowed_packets) && (con -> byte_in_flight < con -> recw)){
+			int to_fetch = std::min(512, 512);
+			char *payload = (char*)malloc(to_fetch);
+			int actual_size = con -> write_buffer -> get(payload, to_fetch);
+			sendTCPSegment(con, payload, actual_size, std::vector<FLAGS>{ACK});
+			free(payload);
+			con -> byte_in_flight += actual_size;
+			total_sent++;
+			total_size += actual_size;
+		}
+		else 
+			break;
 	}
+	if (con -> write_requested){
+		int sysuuid = std::get<0>(con -> write_request);
+		char *ptr = (char*)std::get<1>(con -> write_request);
+		int size = std::get<2>(con -> write_request);
+
+		int actual = con -> write_buffer -> put(ptr, size);
+		con -> write_requested = false;				
+		returnSystemCall(sysuuid, actual);
+		// std::cout << "From else. pcks: " << total_sent << " bytes: " << total_size << std::endl;
+		return;
+	}	
+	// std::cout << "pcks: " << total_sent << " bytes: " << total_size << std::endl;
+
 	con -> write_in_process = false;
 }
 

@@ -73,17 +73,23 @@ public:
         #define MAXBUFFERSIZE 51200 
     class MyBuffer{
         char buffer[MAXBUFFERSIZE];
-        int start, end; // range [0, bufsize - 1]
+        int start, end, size;
 
     public:
         MyBuffer(){
-            start = end = 0;
+            start = end = size = 0;
         }
-        int get(char *tobuffer, int to_get){
-            int available = MAXBUFFERSIZE - end + start;
-            available = (available < 0) ? MAXBUFFERSIZE + available : available;
-            int actual_get = std::min(to_get, available);
 
+        inline int get_size(){
+            return size;
+        }
+
+        inline int available(){
+            return MAXBUFFERSIZE - size;
+        }
+
+        int get(char *tobuffer, int to_get){
+            int actual_get= std::min(to_get, size);
             if (start + actual_get < MAXBUFFERSIZE){
                 memcpy(tobuffer, buffer + start, actual_get);
                 start += actual_get;
@@ -93,16 +99,17 @@ public:
                 int second_phase = actual_get + start - MAXBUFFERSIZE;
                 memcpy(tobuffer + MAXBUFFERSIZE - start, buffer, second_phase);
                 start = second_phase;
+
             }
+            size -= actual_get;
+            // std::cout << "After get: " << size << std::endl;
+            // std::cout << "start: " << start << " end: " << end << " to_get: " << to_get << std::endl;
             return actual_get;
         }
         int put(char *frombuffer, int to_put){
-            int available = MAXBUFFERSIZE - end + start;
-            available = (available < 0) ? MAXBUFFERSIZE + available : available;
-            int actual_put = std::min(to_put, available);
-
-            std::cout << "start: " << start << " end: " << end << " to_put: " << to_put << std::endl;
-            
+            // FILE *fd = fopen("output.txt", "a+");
+            int free = available();
+            int actual_put = std::min(to_put, free);
             if (end + actual_put < MAXBUFFERSIZE){
                 memcpy(buffer + end, frombuffer, actual_put);
                 end += actual_put; 
@@ -111,16 +118,17 @@ public:
             else {
                 memcpy(buffer + end, frombuffer, MAXBUFFERSIZE - end);
                 int second_phase = actual_put + end - MAXBUFFERSIZE;
-                memcpy(buffer, frombuffer, second_phase);
+                memcpy(buffer, frombuffer + MAXBUFFERSIZE - end, second_phase);
                 end = second_phase;
             }
-            std::cout << "put succes" << std::endl;
+            // char buf[32];
+            // sprintf(buf, "Write: Start: %d, End: %d\n", start, end);
+            // fputs(buf, fd);
+            // fclose(fd);
+            size += actual_put;
+            // std::cout << "start: " << start << " end: " << end << " to_put: " << to_put << std::endl;
+            // std::cout << "after put: " << size << std::endl;
             return actual_put;
-        }
-        int size(){
-            int size = end - start;
-            size = (size < 0) ? size + MAXBUFFERSIZE : size;
-            return size;
         }
     };
 
@@ -131,22 +139,27 @@ public:
         std::deque<std::tuple<uint64_t, int, void*>> *accept_queue;
         std::deque<Connection *> *estab_queue;
         socket_state state;
-        uint64_t uuid, timer_uuid, write_uuid, read_uuid;
+        uint64_t uuid, timer_uuid, read_uuid;
         std::map<int, std::pair<uint64_t, Packet*>> timers_map;
-        std::set<int> not_acked_pckts;
-        int pid, recw, conw;
+        std::vector<int> not_acked_pckts;
+        int pid, max_allowed_packets;
+        ushort recw, conw, byte_in_flight;
         in_port_t local_port, remote_port;
-        bool bound, read_request, write_request, write_in_process;
+        bool bound, write_requested, read_request, write_in_process;
+        std::tuple<uint64_t, void*, int> write_request;
         MyBuffer *read_buffer, *write_buffer; 
         Connection(){
-            fd = local_ip = remote_ip = send_isn = recv_isn = local_port = remote_port = backlog = backlog_used = recw = conw = 0;
-            uuid = timer_uuid = write_uuid = read_uuid = 0;
+            fd = local_ip = remote_ip = send_isn = recv_isn = local_port = remote_port = backlog = backlog_used = 0;
+            recw = conw = 1;
+            byte_in_flight = 0;
+            uuid = timer_uuid = read_uuid = 0;
+            max_allowed_packets = 1;
 			pid = -1;
             state = CLOSED_SOCKET;  
-            bound = write_request = read_request = write_in_process = false;
+            bound = write_requested = read_request = write_in_process = false;
             read_buffer = new MyBuffer();
             write_buffer = new MyBuffer();
-            not_acked_pckts = std::set<int>();
+            not_acked_pckts = std::vector<int>();
             timers_map = std::map<int, std::pair<uint64_t, Packet*>>();
         }
         ~Connection(){
@@ -170,7 +183,7 @@ public:
             backlog_used = other.backlog_used;
             pid = other.pid;
             uuid = other.uuid;
-            timer_uuid = other.timer_uuid;
+            recw = other.recw;
         }
     };
 
