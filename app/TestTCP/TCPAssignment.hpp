@@ -94,7 +94,7 @@ public:
                 ack_num = ack;
                 data_length = length;
                 buffer = (char*) malloc(length);
-                for (int i=0; i<length; i++){
+                for (uint16_t i=0; i<length; i++){
                     buffer[i] = payload[i];
                 }
             }
@@ -146,26 +146,38 @@ public:
             inorder_bytes += length;
             
         }
-        int space_available(){return space_available;}
+
+        void insert_inorder(uint32_t seq,uint32_t ack, uint32_t length, char *payload, bool sort){
+            inorder_packet_vector.pb_pp(packet_info_rcvd(seq, ack,length, payload));
+            if (sort)
+                std::sort(inorder_packet_vector.begin(), inorder_packet_vector.end());
+            space_available -= length;
+            expected_seq_num = (expected_seq_num + length)%MAXSEQNUM;
+            inorder_bytes += length;
+            
+        }
+        int available_space(){return space_available;}
         uint32_t expected_seq(){return expected_seq_num;}
-        
+
         void insert_ooo(uint32_t seq,uint32_t ack, uint32_t length, char *payload){
             ooo_packet_vector.pb_pp(packet_info_rcvd(seq, ack,length, payload));
             std::sort(ooo_packet_vector.begin(), ooo_packet_vector.end());
             space_available -= length;
 
         }
+        
         void check_ooo_packets(){
-            packet_info_rcvd temp = ooo_packet_vector.front();
-            while (expected_seq_num == temp.seq_num){
-                inorder_packet_vector.pb_pp(temp);
-                ooo_packet_vector.erase(ooo_packet_vector.begin());
-                inorder_bytes += temp.data_length;
-                expected_seq_num = (expected_seq_num + temp.data_length)%MAXSEQNUM;
-                temp = ooo_packet_vector.front();
+            if (!ooo_packet_vector.empty()){
+                packet_info_rcvd temp = ooo_packet_vector.front();
+                while (expected_seq_num == temp.seq_num){
+                    inorder_packet_vector.pb_pp(temp);
+                    ooo_packet_vector.erase(ooo_packet_vector.begin());
+                    inorder_bytes += temp.data_length;
+                    expected_seq_num = (expected_seq_num + temp.data_length)%MAXSEQNUM;
+                    temp = ooo_packet_vector.front();
+                }
+
             }
-
-
         }
         
 
@@ -174,30 +186,52 @@ public:
                 return NULL;
             }
             else{
-                packet_info_rcvd temp = inorder_packet_vector.front();
+
+                packet_info_rcvd* temp = new packet_info_rcvd();
+                *temp = inorder_packet_vector.front();
                 inorder_packet_vector.erase(inorder_packet_vector.begin());
-                space_available += temp.data_length;
-                inorder_bytes -= temp.data_length;
-                return &temp;
+                space_available += temp->data_length;
+                inorder_bytes -= temp->data_length;
+                return temp;
             }
 
         }
+
+        packet_info_rcvd* top_packet_inorder(){
+            if (inorder_packet_vector.empty()){
+                return NULL;
+            }
+            else{
+
+                packet_info_rcvd* temp = new packet_info_rcvd();
+                *temp = inorder_packet_vector.front();
+                //inorder_packet_vector.erase(inorder_packet_vector.begin());
+                return temp;
+            }
+        }
+
 };
 
     
     class MyBuffer {
         char buffer[MAXBUFFERSIZE];
-        int start, end; // range [0, bufsize - 1]
+        int start, end, size;
 
     public:
         MyBuffer(){
-            start = end = 0;
+            start = end = size = 0;
         }
-        int get(char *tobuffer, int to_get){
-            int available = end - start;
-            available = (available < 0) ? MAXBUFFERSIZE + available : available;
-            int actual_get = std::min(to_get, available);
 
+        inline int get_size(){
+            return size;
+        }
+
+        inline int available(){
+            return MAXBUFFERSIZE - size;
+        }
+
+        int get(char *tobuffer, int to_get){
+            int actual_get= std::min(to_get, size);
             if (start + actual_get < MAXBUFFERSIZE){
                 memcpy(tobuffer, buffer + start, actual_get);
                 start += actual_get;
@@ -207,45 +241,37 @@ public:
                 int second_phase = actual_get + start - MAXBUFFERSIZE;
                 memcpy(tobuffer + MAXBUFFERSIZE - start, buffer, second_phase);
                 start = second_phase;
+
             }
+            size -= actual_get;
+            // std::cout << "After get: " << size << std::endl;
+            // std::cout << "start: " << start << " end: " << end << " to_get: " << to_get << std::endl;
             return actual_get;
         }
         int put(char *frombuffer, int to_put){
-            int available = end - start;
-            available = (available < 0) ? -available : MAXBUFFERSIZE - available;
-            int actual_put = std::min(to_put, available);
-
+            // FILE *fd = fopen("output.txt", "a+");
+            int free = available();
+            int actual_put = std::min(to_put, free);
             if (end + actual_put < MAXBUFFERSIZE){
                 memcpy(buffer + end, frombuffer, actual_put);
-                end += actual_put;
-                end %= MAXBUFFERSIZE; 
+                end += actual_put; 
             }
 
             else {
                 memcpy(buffer + end, frombuffer, MAXBUFFERSIZE - end);
                 int second_phase = actual_put + end - MAXBUFFERSIZE;
-                memcpy(buffer, frombuffer, second_phase);
+                memcpy(buffer, frombuffer + MAXBUFFERSIZE - end, second_phase);
                 end = second_phase;
             }
+            // char buf[32];
+            // sprintf(buf, "Write: Start: %d, End: %d\n", start, end);
+            // fputs(buf, fd);
+            // fclose(fd);
+            size += actual_put;
+            // std::cout << "start: " << start << " end: " << end << " to_put: " << to_put << std::endl;
+            // std::cout << "after put: " << size << std::endl;
             return actual_put;
         }
-
-        
-        int size(){
-            int size = end - start;
-            size = (size < 0) ? size + MAXBUFFERSIZE : size;
-            return size;
-        }
-        int space_availabel(){
-            int available = end - start;
-            available = (available < 0) ? -available : MAXBUFFERSIZE - available;
-            return available;
-
-
-        }
-
-       
-
     };
 
     
@@ -257,21 +283,31 @@ public:
         std::deque<std::tuple<uint64_t, int, void*>> *accept_queue;
         std::deque<Connection *> *estab_queue;
         socket_state state;
-        uint64_t uuid, timer_uuid, write_uuid, read_uuid;
-        int pid;
+        uint64_t uuid, timer_uuid, read_uuid;
+        std::map<int, std::pair<uint64_t, Packet*>> timers_map;
+        std::vector<int> not_acked_pckts;
+        int pid, max_allowed_packets;
+        ushort recw, conw, byte_in_flight;
         in_port_t local_port, remote_port;
-        bool bound, read_request, write_request, write_in_process, sim_connect;
-        MyBuffer *read_buffer, *write_buffer; 
-
+        bool bound, write_requested, read_requested, write_in_process;
+        std::tuple<uint64_t, void*, int> write_request, read_request;
+        MyBuffer *write_buffer; 
+        ReadBuffer *read_buffer;
         
+
         Connection(){
             fd = local_ip = remote_ip = send_isn = recv_isn = local_port = remote_port = backlog = backlog_used = 0;
-            uuid = timer_uuid = write_uuid = read_uuid = 0;
+            recw = conw = 1;
+            byte_in_flight = 0;
+            uuid = timer_uuid = read_uuid = 0;
+            max_allowed_packets = 1;
 			pid = -1;
             state = CLOSED_SOCKET;  
-            bound = write_request = read_request = write_in_process = sim_connect =  false;
-            read_buffer = new MyBuffer();
+            bound = write_requested = read_requested = write_in_process = false;
+            read_buffer = new ReadBuffer();
             write_buffer = new MyBuffer();
+            not_acked_pckts = std::vector<int>();
+            timers_map = std::map<int, std::pair<uint64_t, Packet*>>();
         }
         ~Connection(){
         }
@@ -294,7 +330,7 @@ public:
             backlog_used = other.backlog_used;
             pid = other.pid;
             uuid = other.uuid;
-            timer_uuid = other.timer_uuid;
+            recw = other.recw;
         }
     };
 
@@ -309,8 +345,7 @@ public:
 
 	TCPAssignment(Host* host);
 	virtual void initialize();
-	void construct_tcpheader(Packet * pkt, Connection *con, std::vector<FLAGS> flags);
-    void next_seq_ack(Connection *itr,Connection *in_con, uint16_t payload_size, uint16_t &next_seq,uint16_t &next_ack);
+	void construct_tcpheader(Packet * pkt, Connection *con, std::vector<FLAGS> flags, int payload_size);
 	uint16_t set_flags(std::vector <FLAGS> fl, int length);
 	std::vector<FLAGS> get_flags(short flags);
 	void print_packet(Packet *pkt);
@@ -325,7 +360,9 @@ public:
 
     // Quick Packets
     inline void sendTCPSegment(Connection *con, std::vector<FLAGS> flags);
+    inline void sendTCPSegment(Connection *con, char *payload, int payload_size, std::vector<FLAGS> flags);
     inline void sendRST(Connection* con);
+    void disable_timers_until(Connection* con, uint64_t last);
 
     // Connection vector managment
 	void print_kensock_conns(std::vector<Connection*> con_v);
@@ -337,6 +374,7 @@ public:
     Conn_itr find_by_port_ip(Connection* k_con, socket_state sock_state);
     Conn_itr find_by_lr_port_ip(Connection* k_con, socket_state sock_state);
     Conn_itr find_by_lr_port_ip(Connection* k_con);
+    void do_write(Connection* itr);
 
 protected:
 	virtual void systemCallback(UUID syscallUUID, int pid, const SystemCallParameter& param) final;
