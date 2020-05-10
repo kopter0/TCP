@@ -128,83 +128,17 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 
 		total_bytes_left =  param.param3_int;
 		buffer_ptr = (char*) param.param2_ptr;
-		in_bytes = (*itr)->read_buffer->inorder_bytes;
-		in_bytes_ret = in_bytes;
+		in_bytes = (*itr) -> read_buffer -> inorder_bytes;
 		if (in_bytes > 0){
-			while(total_bytes_left > 0 && in_bytes > 0){
-				temp = (*itr)->read_buffer->pop_packet_inorder();
-				if (total_bytes_left >= temp->data_length){
-					for(uint i = 0; i < temp->data_length ; i++){
-						*buffer_ptr = temp->buffer[i];
-						buffer_ptr++;
-					}
-					total_bytes_left -= temp->data_length;
-
-				}
-				else{
-					for(uint i = 0; i < total_bytes_left ; i++){
-						*buffer_ptr = temp->buffer[i];
-						buffer_ptr++;
-					}
-					(*itr)->read_buffer->insert_inorder(temp->seq_num + total_bytes_left, temp->ack_num, temp->data_length - total_bytes_left, buffer_ptr, true);
-					total_bytes_left = 0;
-
-				}
-
-			in_bytes = (*itr)->read_buffer->inorder_bytes;
-			}
-
-			returnSystemCall(syscallUUID, std::min(in_bytes_ret, (uint) param.param3_int));
+			uint32_t actual_get = (*itr) -> read_buffer -> get(buffer_ptr, total_bytes_left);
+			returnSystemCall(syscallUUID, actual_get);
 			break;
 		}
 		else{
 			(*itr)->read_requested = true;
-			(*itr)->read_request = std::make_tuple(syscallUUID, param.param2_ptr,param.param3_int);
+			(*itr)->read_request = std::make_tuple(syscallUUID, param.param2_ptr, param.param3_int);
 			break;
 		}
-		// if ((*itr)->read_buffer->inorder_bytes >= param.param3_int){
-		// 	while(total_bytes_left > 0){
-		// 		TCPAssignment::ReadBuffer::packet_info_rcvd *temp = (*itr)->read_buffer->pop_packet_inorder();
-		// 		for(uint i = 0; i<temp->data_length;i++){
-		// 				*buffer_ptr = temp->buffer[i];
-		// 				buffer_ptr++;
-		// 		}
-		// 		total_bytes_left -= temp->data_length;
-
-		// 	}
-		// 	returnSystemCall(syscallUUID, param.param3_int);
-		// 	break;
-		// }
-
-		// in_bytes = (*itr)->read_buffer->inorder_bytes;
-		//std::cout<<in_bytes<<"\n";
-		// while(total_bytes_left > 0 && (*itr)->read_buffer->inorder_bytes != 0 ){
-		// 	TCPAssignment::ReadBuffer::packet_info_rcvd *temp = (*itr)->read_buffer->pop_packet_inorder();
-		// 	if (total_bytes_left >= temp->data_length){
-		// 		for(uint i = 0; i < temp->data_length ; i++){
-		// 		*buffer_ptr = temp->buffer[i];
-		// 		buffer_ptr++;
-		// 		}
-		// 		total_bytes_left -= temp->data_length;
-
-		// 	}
-		// 	else{
-		// 		for(uint i = 0; i < total_bytes_left ; i++){
-		// 			*buffer_ptr = temp->buffer[i];
-		// 			buffer_ptr++;
-		// 		}
-		// 		(*itr)->read_buffer->insert_inorder(temp->seq_num + total_bytes_left, temp->ack_num, temp->data_length - total_bytes_left, buffer_ptr, true);
-		// 		total_bytes_left = 0;
-		// 	}
-
-
-
-		// }
-
-		
-			
-	
-		
 	case WRITE:
 		//this->syscall_write(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
 		// std::cout << "write" << std::endl;
@@ -322,7 +256,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 			sa -> sin_port = htons(new_conn -> remote_port);
 			memset(sa -> sin_zero, 0, 8);
 			//
-			(*itr)->read_buffer->set_expected_seq_num((*itr)->recv_isn);
+			// (*itr)->read_buffer->set_expected_seq_num((*itr)->recv_isn);
 			returnSystemCall(syscallUUID, new_conn -> fd);
 		}
 		else {
@@ -469,6 +403,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		packet -> readData(OFFSET_SEQ_NUM, &(in_con -> recv_isn), 4);
 		packet -> readData(OFFSET_ACK_NUM, &(in_con -> send_isn), 4);
 		packet -> readData(OFFSET_REC_WNDW, &rec_window, 2);
+		packet -> readData(48, &recw, 2);
 		payload_size = packet -> getSize();
 		payload_size -= 54; // - header size
 		
@@ -479,13 +414,13 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		checksum = ~checksum;
 		if (checksum != 0){
 			this->freePacket(packet);
+			// free(tcp_segment_temp);
 			return;
-		packet -> readData(48, &recw, 2);
 		// add length detector
-
 		}
 		char payload[payload_size];
-		memcpy((void*)payload, (const void *)(tcp_segment_temp + 20), payload_size );
+		memcpy(payload, tcp_segment_temp + 20, payload_size);
+		// free(tcp_segment_temp);
 		// add length detector
 		
 		in_con -> local_ip = ntohl(in_con -> local_ip);
@@ -621,66 +556,18 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			itr = find_by_lr_port_ip(in_con);
 
 			if (itr != connection_vector.end()){
-				// if ((*itr) -> state == ESTAB_SOCKET){
-				// 	returnSystemCall((*itr)->uuid, 0 );
-				// }
 				if ((*itr) -> state == ESTAB_SOCKET){
 					// printPack(packet, flag_vector);
 					if (payload_size > 0){
-						uint32_t cur_seq = (in_con->recv_isn);
-						uint32_t exp_seq = (((*itr)->read_buffer)->expected_seq());
-						if (cur_seq == exp_seq){
-							(*itr)->read_buffer->insert_inorder(in_con->recv_isn, in_con->send_isn, payload_size, payload);
-							(*itr)->read_buffer->check_ooo_packets();
-							((*itr)->recv_isn) = (((*itr)->read_buffer)->expected_seq());
-							sendTCPSegment((*itr), std::vector<FLAGS>{ACK}); 
-							if ((*itr)->read_requested){
-								uint bytes_read_left = std::get<2>((*itr)->read_request);
-
-								char* buffer_ptr = (char *) std::get<1>((*itr)->read_request);
-								
-								uint in_bytes = (*itr)->read_buffer->inorder_bytes;
-								uint in_bytes_ret = in_bytes;
-								while(bytes_read_left > 0 && in_bytes > 0){
-									TCPAssignment::ReadBuffer::packet_info_rcvd *temp = (*itr)->read_buffer->pop_packet_inorder();
-									if (bytes_read_left >= temp->data_length){
-										for(uint i = 0; i < temp->data_length ; i++){
-											*buffer_ptr = temp->buffer[i];
-											buffer_ptr++;
-										}
-										bytes_read_left -= temp->data_length;
-
-									}
-									else{
-										for(uint i = 0; i < bytes_read_left ; i++){
-											*buffer_ptr = temp->buffer[i];
-											buffer_ptr++;
-										}
-										(*itr)->read_buffer->insert_inorder(temp->seq_num + bytes_read_left, temp->ack_num, temp->data_length - bytes_read_left, buffer_ptr, true);
-										bytes_read_left = 0;
-
-									}
-
-								in_bytes = (*itr)->read_buffer->inorder_bytes;
-								}
-													
-								returnSystemCall(std::get<0>((*itr)->read_request), std::min(in_bytes_ret,(uint) std::get<2>((*itr)->read_request) ));
-								(*itr)->read_requested = false;
-							}
-							// add write if needed
-							return;
+						(*itr) -> recv_isn = (*itr) -> read_buffer -> put(payload, in_con -> recv_isn, in_con -> send_isn, payload_size);
+						if ((*itr)->read_requested && (*itr) -> read_buffer -> inorder_bytes > 0){
+							uint to_read = std::get<2>((*itr)->read_request);
+							char* to_buffer = (char *) std::get<1>((*itr)->read_request);
+							uint32_t actual_get = (*itr) -> read_buffer -> get(to_buffer, to_read);
+							(*itr) -> read_requested = false;
+							returnSystemCall(std::get<0>((*itr)->read_request), actual_get);
 						}
-						else if (cur_seq > exp_seq){
-							(*itr)->read_buffer->insert_ooo(in_con->recv_isn, in_con->send_isn, payload_size, payload);
-							sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
-							return;
-						}
-						else{
-							sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
-							return;
-						}
-
-
+						sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
 					}
 					auto to_ack = &((*itr) -> not_acked_pckts);
 					if (to_ack -> size() > 0){
@@ -696,10 +583,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 						}
 					}
 					else {
-						(*itr)->read_buffer->set_expected_seq_num((*itr)->recv_isn);
-
-						returnSystemCall((*itr)->uuid, 0 );
+						returnSystemCall((*itr) -> uuid, 0);
 					}
+					// else {
+					// 	(*itr)->read_buffer->set_expected_seq_num((*itr)->recv_isn);
+					// 	returnSystemCall((*itr)->uuid, 0 );
+					// }
 				}
 				
 				
@@ -716,6 +605,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					t_connection -> state = ESTAB_SOCKET;
 					itr = find_by_fd(t_connection -> fd, t_connection -> pid, LISTEN_SOCKET);
 					t_connection -> recw = recw;
+					t_connection -> recv_isn = in_con -> recv_isn;
+					t_connection -> read_buffer -> set_expected_seq_num(in_con -> recv_isn);
+
+					// std::cout << in_con -> recv_isn << std::endl << std::endl;
 
 					if ( (*itr) -> accept_queue -> size() > 0){
 						std::tuple<uint64_t, int, void*> tup = (*itr) -> accept_queue -> front();
@@ -730,7 +623,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 						sockad -> sin_family = AF_INET;
 						sockad -> sin_port = htonl(t_connection -> remote_port);
 						memset(sockad -> sin_zero, 0, 8);
-						(*itr)->read_buffer->set_expected_seq_num((*itr)->recv_isn);
+						// (*itr)->read_buffer->set_expected_seq_num((*itr)->recv_isn);
 						returnSystemCall((UUID)std::get<0>(tup), new_fd);
 
 					}
@@ -1127,14 +1020,6 @@ void TCPAssignment::print_kensock_conns( std::vector<Connection*> con_v ){
 
 
 #pragma endregion Vector Interactions
-
-#pragma region ReadBuffer
-
-
-
-	
-	
-#pragma endregion ReadBuffer
 
 
 

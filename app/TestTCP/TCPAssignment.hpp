@@ -78,6 +78,7 @@ public:
     #define MAXSEQNUM 4294967296
     #define pv_itr std::vector<ReadBuffer::packet_info_rcvd>::iterator
     #define pb_pp std::vector<ReadBuffer::packet_info_rcvd>::push_back
+
     class ReadBuffer{
         public:
         int space_available;
@@ -94,9 +95,7 @@ public:
                 ack_num = ack;
                 data_length = length;
                 buffer = (char*) malloc(length);
-                for (uint16_t i=0; i<length; i++){
-                    buffer[i] = payload[i];
-                }
+                memcpy(buffer, payload, length);
             }
             packet_info_rcvd(){};
             
@@ -152,7 +151,7 @@ public:
             if (sort)
                 std::sort(inorder_packet_vector.begin(), inorder_packet_vector.end());
             space_available -= length;
-            expected_seq_num = (expected_seq_num + length)%MAXSEQNUM;
+            // expected_seq_num = (expected_seq_num + length)%MAXSEQNUM;
             inorder_bytes += length;
             
         }
@@ -170,13 +169,13 @@ public:
             if (!ooo_packet_vector.empty()){
                 packet_info_rcvd temp = ooo_packet_vector.front();
                 while (expected_seq_num == temp.seq_num){
+                    // std::cout << "Defrag" << std::endl;
                     inorder_packet_vector.pb_pp(temp);
                     ooo_packet_vector.erase(ooo_packet_vector.begin());
                     inorder_bytes += temp.data_length;
                     expected_seq_num = (expected_seq_num + temp.data_length)%MAXSEQNUM;
                     temp = ooo_packet_vector.front();
                 }
-
             }
         }
         
@@ -208,6 +207,45 @@ public:
                 //inorder_packet_vector.erase(inorder_packet_vector.begin());
                 return temp;
             }
+        }
+
+        int get(char *tobuffer, uint32_t to_get){
+            uint32_t actual_get = std::min(to_get, inorder_bytes);
+            uint32_t left_read = actual_get;
+            while(left_read > 0 && actual_get > 0){
+                auto temp = pop_packet_inorder();
+                if (left_read >= temp -> data_length){
+                    memcpy(tobuffer, temp -> buffer, temp -> data_length);
+                    left_read -= temp -> data_length;
+                    tobuffer += temp -> data_length;
+                    // free(temp);
+                }
+                else{
+                    // std::cout << "Not enough " << temp -> data_length << " " << left_read;
+                    memcpy(tobuffer, temp -> buffer, left_read);
+                    insert_inorder(temp -> seq_num, temp -> ack_num,(uint32_t)(temp -> data_length - left_read), temp -> buffer + left_read, true);
+                    left_read = 0;
+                    // free(temp);
+                }
+            }
+            return actual_get;
+        }
+
+        uint32_t put(char *frombuffer, uint32_t cur_seq, uint32_t send_isn, uint32_t to_put){
+            if (cur_seq == expected_seq_num){
+                // std::cout << "As Expected" << std::endl;
+                insert_inorder(cur_seq, send_isn, to_put, frombuffer);
+                check_ooo_packets();
+            }
+            else if (cur_seq > expected_seq_num){
+                // std::cout << "OOO" << std::endl;
+                insert_ooo(cur_seq, send_isn, to_put, frombuffer);
+            }
+            else {
+                // std::cout << "Prev" << std::endl;
+            }                
+            // std::cout << cur_seq << " " << expected_seq_num << std::endl;
+            return expected_seq_num;
         }
 
 };
@@ -279,7 +317,7 @@ public:
 	struct Connection{
         uint fd;
         in_addr_t local_ip, remote_ip;
-        uint send_isn, recv_isn, backlog, backlog_used;
+        uint32_t send_isn, recv_isn, backlog, backlog_used;
         std::deque<std::tuple<uint64_t, int, void*>> *accept_queue;
         std::deque<Connection *> *estab_queue;
         socket_state state;
