@@ -59,6 +59,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 	
 	uint total_bytes_left, in_bytes, in_bytes_ret; 
 	char *buffer_ptr;
+	signed char*buffer_ptr1;
 	TCPAssignment::ReadBuffer::packet_info_rcvd *temp;
 
 	int inter_index, temp_int;
@@ -92,7 +93,6 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		}
 
 		if ((*itr)->state == ESTAB_SOCKET){
-			break;
 			sendTCPSegment((*itr), std::vector<FLAGS>{FIN, ACK});
 			(*itr) -> send_isn++;
 			(*itr) -> state = FIN_WAIT_1_SOCKET;
@@ -118,6 +118,10 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		//this->syscall_read(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
 		fd = param.param1_int;
 		itr = find_by_fd(fd, pid);
+
+		
+
+
 		if (itr == connection_vector.end()){
 			returnSystemCall(syscallUUID, -1);
 			break;
@@ -143,7 +147,15 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		//this->syscall_write(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
 		// std::cout << "write" << std::endl;
 		itr = find_by_fd(param.param1_int, pid);
+		buffer_ptr1 = (signed char*) param.param2_ptr;
+		for (int i =	0; i<param.param3_int; i++){
+			if(*buffer_ptr1==EOF)
+				std::cout<<i<<*buffer_ptr1<<" EOF\n";
+			buffer_ptr1++;			
+		}
 		
+			
+
 		if ((*itr) -> write_buffer -> available() > 0){
 			temp_int = (*itr) -> write_buffer -> put((char*)param.param2_ptr, param.param3_int);
 			returnSystemCall(syscallUUID, temp_int);
@@ -501,6 +513,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 				else if ((*itr) -> state == ESTAB_SOCKET){
 					(*itr) -> state = CLOSE_WAIT_SOCKET;
+					if ((*itr)-> read_requested){
+						returnSystemCall(std::get<0>((*itr)->read_request),-1);
+						(*itr)-> read_requested = false;
+					}
 				}
 				(*itr) -> recv_isn++;
 				sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
