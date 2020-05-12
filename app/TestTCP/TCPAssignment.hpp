@@ -290,6 +290,7 @@ public:
             // FILE *fd = fopen("output.txt", "a+");
             int free = available();
             int actual_put = std::min(to_put, free);
+
             if (end + actual_put < MAXBUFFERSIZE){
                 memcpy(buffer + end, frombuffer, actual_put);
                 end += actual_put; 
@@ -327,7 +328,7 @@ public:
         int pid, max_allowed_packets;
         ushort recw, conw, byte_in_flight;
         in_port_t local_port, remote_port;
-        bool bound, write_requested, read_requested, write_in_process;
+        bool bound, write_requested, read_requested, close_requested ,write_in_process;
         std::tuple<uint64_t, void*, int> write_request, read_request;
         MyBuffer *write_buffer; 
         ReadBuffer *read_buffer;

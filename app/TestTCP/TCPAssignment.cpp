@@ -90,9 +90,14 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		if (itr == connection_vector.end()){		
 			returnSystemCall(syscallUUID, -1);
 		}
+		
 
 		if ((*itr)->state == ESTAB_SOCKET){
-			break;
+			if ((*itr) -> write_in_process){
+				(*itr) -> close_requested = true;
+				(*itr) -> uuid = syscallUUID;
+				break;
+			}
 			sendTCPSegment((*itr), std::vector<FLAGS>{FIN, ACK});
 			(*itr) -> send_isn++;
 			(*itr) -> state = FIN_WAIT_1_SOCKET;
@@ -112,6 +117,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 			connection_vector.erase(itr);
 			returnSystemCall(syscallUUID, 0);
 		}
+		
 		
 		break;
 	case READ:
@@ -154,6 +160,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		}
 
 		if (!(*itr) -> write_in_process){
+			// std::cout << "Got here" << std::endl;
 			do_write(*itr);
 		}
 		
@@ -453,6 +460,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				(*itr)->recv_isn = in_con->recv_isn + 1;
 				// (*itr)->send_isn = in_con->send_isn;
 				(*itr) -> send_isn++;
+				(*itr) -> recw = recw;
 				
 				sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
 				free(in_con);
@@ -470,6 +478,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 			(*itr)->state = ESTAB_SOCKET;
 			(*itr)-> recv_isn = in_con -> recv_isn + 1; 
+			(*itr) -> recw = recw;
 			
 			sendTCPSegment((*itr), std::vector<FLAGS>{ACK});	
 			
@@ -501,6 +510,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 				else if ((*itr) -> state == ESTAB_SOCKET){
 					(*itr) -> state = CLOSE_WAIT_SOCKET;
+					if ((*itr) -> read_requested){
+						returnSystemCall(std::get<0>((*itr) -> read_request), -1);
+						(*itr) -> read_requested = false;
+					}
 				}
 				(*itr) -> recv_isn++;
 				sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
@@ -579,7 +592,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 						if (to_ack -> size() == 0){
 							(*itr) -> byte_in_flight = 0;
 							do_write((*itr));
-							// std::cout << "sdfds" << std::endl;
 						}
 					}
 					else {
@@ -820,8 +832,10 @@ void TCPAssignment::disable_timers_until(Connection *con, uint64_t last){
 void TCPAssignment::do_write(Connection* con){
 	con -> write_in_process = true;
 	int total_sent = 0, total_size = 0;
+
 	while (con -> write_buffer -> get_size() > 0){
 		if ((con -> not_acked_pckts.size() < con -> max_allowed_packets) && (con -> byte_in_flight < con -> recw)){
+			// std::cout << con -> recw << " " << con -> max_allowed_packets << std::endl;
 			int to_fetch = std::min(512, 512);
 			char *payload = (char*)malloc(to_fetch);
 			int actual_size = con -> write_buffer -> get(payload, to_fetch);
@@ -842,11 +856,14 @@ void TCPAssignment::do_write(Connection* con){
 		int actual = con -> write_buffer -> put(ptr, size);
 		con -> write_requested = false;				
 		returnSystemCall(sysuuid, actual);
-		// std::cout << "From else. pcks: " << total_sent << " bytes: " << total_size << std::endl;
 		return;
 	}	
-	// std::cout << "pcks: " << total_sent << " bytes: " << total_size << std::endl;
-
+	if (con -> write_buffer -> get_size() == 0 && con -> close_requested){
+		sendTCPSegment(con, std::vector<FLAGS>{FIN, ACK});
+		con -> send_isn++;
+		con -> state = FIN_WAIT_1_SOCKET;
+		return;
+	}
 	con -> write_in_process = false;
 }
 
