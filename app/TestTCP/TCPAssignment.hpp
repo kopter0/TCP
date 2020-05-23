@@ -40,7 +40,7 @@ public:
     #define OFFSET_REC_WNDW 48
     #define OFFSET_CHECKSUM 50
     #define OFFSET_PAYLOAD 54
-    
+    #define STANDARD_TIMEOUT 1e10
 	
 	enum FLAGS {SYN, ACK, FIN, RST};
     
@@ -314,17 +314,16 @@ public:
     };
 
     
-
 	struct Connection{
         uint fd;
         in_addr_t local_ip, remote_ip;
         uint32_t send_isn, recv_isn, backlog, backlog_used;
-        std::deque<std::tuple<uint64_t, int, void*>> *accept_queue;
+        std::deque<std::tuple<UUID, int, void*>> *accept_queue;
         std::deque<Connection *> *estab_queue;
         socket_state state;
         uint64_t uuid, timer_uuid, read_uuid;
-        std::map<int, std::pair<uint64_t, Packet*>> timers_map;
-        std::vector<int> not_acked_pckts;
+        std::map<uint, std::pair<uint64_t, Packet*>> timers_map;
+        std::vector<uint> not_acked_pckts;
         int pid, max_allowed_packets;
         ushort recw, conw, byte_in_flight;
         in_port_t local_port, remote_port;
@@ -345,8 +344,8 @@ public:
             bound = write_requested = read_requested = write_in_process = false;
             read_buffer = new ReadBuffer();
             write_buffer = new MyBuffer();
-            not_acked_pckts = std::vector<int>();
-            timers_map = std::map<int, std::pair<uint64_t, Packet*>>();
+            not_acked_pckts = std::vector<uint>();
+            timers_map = std::map<uint, std::pair<uint64_t, Packet*>>();
         }
         ~Connection(){
         }
@@ -374,6 +373,25 @@ public:
     };
 
 
+    struct TimerCallbackFrame{
+        enum TimerType{
+            ACKTimeout,
+            TimedWait,
+            NONE
+        };
+
+        TimerType timer_type;
+        void *ptr;
+
+        TimerCallbackFrame(){
+            this -> timer_type = NONE;
+            this -> ptr = NULL;
+        }
+        TimerCallbackFrame(TimerType type, void* ptr){
+            this -> timer_type = type;
+            this -> ptr = ptr;
+        }
+    };
 
 	#define Conn_itr std::vector<TCPAssignment::Connection*>::iterator
     std::vector<Connection*> connection_vector;
@@ -381,6 +399,7 @@ public:
     
 	std::vector<FLAGS> all_flags;
 	std::map<FLAGS, bool> flag_map;
+
 
 	TCPAssignment(Host* host);
 	virtual void initialize();
@@ -401,7 +420,7 @@ public:
     inline void sendTCPSegment(Connection *con, std::vector<FLAGS> flags);
     inline void sendTCPSegment(Connection *con, char *payload, int payload_size, std::vector<FLAGS> flags);
     inline void sendRST(Connection* con);
-    void disable_timers_until(Connection* con, uint64_t last);
+    void cancelTimers(Connection* con, uint64_t last);
 
     // Connection vector managment
 	void print_kensock_conns(std::vector<Connection*> con_v);
