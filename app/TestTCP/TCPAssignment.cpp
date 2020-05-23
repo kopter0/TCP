@@ -458,6 +458,11 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				
 				cancelTimers(*find(in_con), in_con -> send_isn);
 
+				if ((*itr) -> state == ESTAB_SOCKET){
+					// Simultaneous connect, ACK Lost
+					sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
+				}
+				
 				if ((*itr) -> state == SYN_RCVD_SOCKET){
 					(*itr)->state = ESTAB_SOCKET;
 					(*itr)->recv_isn = in_con->recv_isn + 1;
@@ -474,16 +479,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					(*itr)-> recv_isn = in_con -> recv_isn + 1; 
 					(*itr) -> recw = recw;
 					
-					sendTCPSegment((*itr), NULL, 0, std::vector<FLAGS>{ACK});	
+					sendTCPSegment((*itr), std::vector<FLAGS>{ACK});	
 					
 					(*itr)->read_buffer->set_expected_seq_num((*itr)->recv_isn);
 					returnSystemCall((*itr)->uuid, 0);
 				}
 
-				if ((*itr) -> state == ESTAB_SOCKET){
-					// Simultaneous connect, ACK Lost
-					sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
-				}
 			}
 			
 			free(in_con);
@@ -809,24 +810,12 @@ inline void TCPAssignment::sendTCPSegment(Connection *con, char* payload, int pa
 	this -> sendPacket("IPv4", pck);
 }
 
-// void TCPAssignment::next_seq_ack(Connection *itr,Connection *in_con, uint16_t payload_size, uint16_t &next_seq,uint16_t &next_ack){
-
-// 	// make the out of order packets work
-
-
-
-
-
-
-// }
-
-
 inline void TCPAssignment::sendRST(Connection *con){
 	sendTCPSegment(con, std::vector<FLAGS>{RST});
 }
 
 void TCPAssignment::cancelTimers(Connection *con, uint64_t last){
-	std::cout << "Canceling " << last << std::endl;
+	// std::cout << "Canceling " << last << std::endl;
 	auto to_ack = &(con -> not_acked_pckts);
 	for (int i = 0; i < to_ack -> size(); i++){
 		std::cout << (*to_ack)[i] << std::endl; 
@@ -836,10 +825,10 @@ void TCPAssignment::cancelTimers(Connection *con, uint64_t last){
 		auto p = con -> timers_map[*titr];
 		this -> cancelTimer(p.first);
 		this -> freePacket(p.second);
-		std::cout << 0 << std::endl;
 		con -> timers_map.erase(*titr);
-		std::cout << p.first << " Canceled" << std::endl;
+		// std::cout << p.first << " Canceled" << std::endl;
 	}
+	to_ack -> erase(to_ack -> begin(), ack_itr);
 }
 
 
