@@ -40,7 +40,7 @@ public:
     #define OFFSET_REC_WNDW 48
     #define OFFSET_CHECKSUM 50
     #define OFFSET_PAYLOAD 54
-    #define STANDARD_TIMEOUT 1e10
+    #define STANDARD_TIMEOUT 1e8
 	
 	enum FLAGS {SYN, ACK, FIN, RST};
     
