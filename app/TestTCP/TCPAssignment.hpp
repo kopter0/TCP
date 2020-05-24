@@ -322,7 +322,7 @@ public:
         std::deque<Connection *> *estab_queue;
         socket_state state;
         uint64_t uuid, timer_uuid, read_uuid;
-        std::map<uint, std::pair<uint64_t, Packet*>> timers_map;
+        std::map<uint, void*> timers_map;
         std::vector<uint> not_acked_pckts;
         int pid, max_allowed_packets;
         ushort recw, conw, byte_in_flight;
@@ -345,7 +345,7 @@ public:
             read_buffer = new ReadBuffer();
             write_buffer = new MyBuffer();
             not_acked_pckts = std::vector<uint>();
-            timers_map = std::map<uint, std::pair<uint64_t, Packet*>>();
+            timers_map = std::map<uint, void*>();
         }
         ~Connection(){
         }
@@ -381,15 +381,23 @@ public:
         };
 
         TimerType timer_type;
-        void *ptr;
+        void *con;
+        void *payload;
+        int payload_size;
+        bool self_destruct;
 
         TimerCallbackFrame(){
             this -> timer_type = NONE;
-            this -> ptr = NULL;
+            this -> self_destruct = false;
+            this -> payload = NULL;
+            this -> con = NULL;
         }
-        TimerCallbackFrame(TimerType type, void* ptr){
+        TimerCallbackFrame(TimerType type, void *con, void* payload, int payload_size){
             this -> timer_type = type;
-            this -> ptr = ptr;
+            this -> self_destruct = false;
+            this -> payload = payload;
+            this -> con = con;
+            this -> payload_size = payload_size;
         }
     };
 
