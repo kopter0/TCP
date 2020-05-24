@@ -612,7 +612,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					in_con -> recv_isn++;
 					in_con -> recw = recw;
 					connection_vector.push_back(in_con);
-					sendTCPSegment(in_con, std::vector<FLAGS>{SYN, ACK});
+					sendTCPSegment(in_con,NULL, 0, std::vector<FLAGS>{SYN, ACK});
 					in_con -> send_isn++;
 				}
 
@@ -662,6 +662,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				
 
 				if ((*itr) -> state == LAST_ACK_SOCKET){
+					cancelTimers((*itr), in_con->send_isn);
 					std::cout << "LASt" << std::endl;
 					uint64_t uuid_temp = (*itr)->uuid;
 					connection_vector.erase(itr);
@@ -888,7 +889,10 @@ inline void TCPAssignment::sendTCPSegment(Connection *con, char* payload, int pa
 	construct_tcpheader(pck, con, flags, payload_size);
 	int old_seq = con -> send_isn;
 	con -> send_isn += payload_size;
-	con -> not_acked_pckts.push_back(old_seq);
+	if  (std::find((con -> not_acked_pckts).begin(), (con -> not_acked_pckts).end(),old_seq) ==  (con -> not_acked_pckts).end()){
+			con -> not_acked_pckts.push_back(old_seq);
+
+	}
 	
 	char *buffer = (char*) malloc(54 + payload_size);
 	pck -> readData(0, buffer, 54 + payload_size);
