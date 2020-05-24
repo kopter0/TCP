@@ -87,10 +87,12 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 	case CLOSE:
 		//this->syscall_close(syscallUUID, pid, param.param1_int);
 		fd = param.param1_int;
+		std::cout<<"in close"<<std::endl;
 		itr = find_by_fd(fd, pid);
 		if (itr == connection_vector.end()){		
 			returnSystemCall(syscallUUID, -1);
 		}
+		std::cout<<"in close"<<std::endl;
 		
 
 		if ((*itr)->state == ESTAB_SOCKET){
@@ -99,7 +101,9 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 				(*itr) -> uuid = syscallUUID;
 				break;
 			}
-			sendTCPSegment((*itr), std::vector<FLAGS>{FIN, ACK});
+			std::cout<<"in csdlose"<<std::endl;
+
+			sendTCPSegment((*itr),NULL,0, std::vector<FLAGS>{FIN, ACK});
 			(*itr) -> send_isn++;
 			(*itr) -> state = FIN_WAIT_1_SOCKET;
 			(*itr) -> uuid = syscallUUID;
@@ -228,6 +232,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		(*itr)-> pid = pid;
 
 		// sendTCPSegment((*itr), std::vector<FLAGS>{SYN});
+		std::cout<<"SYN sent\n";
 		sendTCPSegment((*itr), NULL, 0, std::vector<FLAGS>{SYN});
 		(*itr) -> send_isn++;
 		break;
@@ -256,15 +261,20 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		//this->syscall_accept(syscallUUID, pid, param.param1_int,
 		//		static_cast<struct sockaddr*>(param.param2_ptr),
 		//		static_cast<socklen_t*>(param.param3_ptr));
-		// std::cout<<"in accept_sys_call"<<std::endl;
+		std::cout<<"in accept_sys_call"<<std::endl;
 		fd = param.param1_int; 
 		itr = find_by_fd(fd, pid, LISTEN_SOCKET);
+		std::cout<<"in accept_sys_call"<<std::endl;
+
 		if (itr == connection_vector.end()){
 			returnSystemCall(syscallUUID, -1);
 			break;
 		}
 
 		if ((*itr)->estab_queue -> size() > 0){
+			std::cout<<"isept_sys_call"<<std::endl;
+			std::cout<<"isept_sys_call"<<std::endl;
+
 			(*itr) -> backlog_used--;
 			auto new_conn = (*itr) -> estab_queue -> front();
 			(*itr) -> estab_queue -> pop_front();
@@ -282,6 +292,8 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		}
 		else {
 			(*itr) -> accept_queue -> push_back(std::make_tuple(syscallUUID, pid, param.param2_ptr));
+			std::cout<<"iseptys_call"<<std::endl;
+			
 		}
 		break;
 	case BIND:
@@ -383,10 +395,10 @@ void TCPAssignment::printPack(Packet* pck, std::vector<TCPAssignment::FLAGS> fl)
 		switch (fl[i])
 		{
 		case TCPAssignment::SYN:
-			std::cout << "SYN ";
+			std::cout << "SYN Received ";
 			break;
 		case TCPAssignment::ACK:
-			std::cout << "ACK ";
+			std::cout << "ACK Received";
 			break;
 		case TCPAssignment::RST:
 			std::cout << "RST ";
@@ -460,7 +472,9 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		for (FLAGS fl: flag_vector){
 			flag_map[fl] = true;
 		}
+		std::cout<<"printPack: ";
 		printPack(packet, flag_vector);
+		std::cout<<"printPack end\n ";
 		// SYN ACK signal
 		if (flag_map[SYN] && flag_map[ACK]){
 			this-> freePacket(packet);
@@ -521,7 +535,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 				
 
-				else if ((*itr) -> state == ESTAB_SOCKET){
+				else {
+					cancelTimers((*itr),in_con->send_isn);
 					(*itr) -> state = CLOSE_WAIT_SOCKET;
 					if ((*itr) -> read_requested){
 						returnSystemCall(std::get<0>((*itr) -> read_request), -1);
@@ -552,6 +567,24 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				return;	
 			}
 
+			itr = find_by_port_ip(in_con, SYN_RCVD_SOCKET);
+			
+			if (itr != connection_vector.end()){
+
+				(*itr) -> state = SYN_RCVD_SOCKET;
+				//(*itr) -> recv_isn = in_con -> recv_isn + 1;
+				std::cout<<"SYN_rcvd_state and receive SYN\n";
+				(*itr) -> send_isn--;			
+				sendTCPSegment((*itr), NULL, 0, std::vector<FLAGS>{SYN, ACK});
+				(*itr) -> send_isn++;
+				return;	
+			}
+
+			if (connection_vector.end() != find_by_lr_port_ip(in_con))
+			{
+				return;
+			}
+
 			itr = find_by_port_ip(in_con, LISTEN_SOCKET);
 			
 			if (!(((*itr) -> backlog_used) < ((*itr) -> backlog))){
@@ -566,14 +599,16 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			in_con -> recv_isn++;
 			in_con -> recw = recw;
 			connection_vector.push_back(in_con);
-			sendTCPSegment(in_con,NULL,0, std::vector<FLAGS>{SYN, ACK}); // reliable
+			std::cout<<"SYNACK sent\n";
+			sendTCPSegment(in_con, NULL, 0, std::vector<FLAGS>{SYN, ACK}); // reliable
 			in_con -> send_isn++;
 		}
 		// ACK
 		else if (flag_map[ACK])
 		{
-			std::cout << "ACK Packet" << std::endl;
+			std::cout << "ACK Received" << std::endl;
 			// sim connect
+
 			itr = find_by_lr_port_ip(in_con);
 			if (itr != connection_vector.end()){
 				if ((*itr) -> state == ESTAB_SOCKET){
@@ -622,15 +657,19 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				if ((*itr) -> state == SYN_RCVD_SOCKET){
 					std::cout << "why" << std::endl;
 					Connection *t_connection = (*itr);
+					std::cout<<"0\n";
 					t_connection -> state = ESTAB_SOCKET;
+					cancelTimers((*itr), in_con -> send_isn );
+					std::cout<<"0\n";
 					itr = find_by_fd(t_connection -> fd, t_connection -> pid, LISTEN_SOCKET);
 					t_connection -> recw = recw;
 					t_connection -> recv_isn = in_con -> recv_isn;
 					t_connection -> read_buffer -> set_expected_seq_num(in_con -> recv_isn);
-
+					std::cout<<"0\n";
 					// std::cout << in_con -> recv_isn << std::endl << std::endl;
 
 					if ( (*itr) -> accept_queue -> size() > 0){
+						std::cout<<"0acc\n ";
 						std::tuple<uint64_t, int, void*> tup = (*itr) -> accept_queue -> front();
 						(*itr) -> accept_queue -> pop_front();
 
@@ -648,6 +687,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 					}
 					else{
+						std::cout<<"0ba\n ";
+
 						(*itr) -> estab_queue -> push_back(t_connection);
 						(*itr) -> backlog_used --;
 					}		
@@ -664,6 +705,11 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					cancelTimers((*itr), in_con -> send_isn);
 					this -> addTimer((void*)new TimerCallbackFrame(TimerCallbackFrame::TimedWait, (*itr)), 2 * STANDARD_TIMEOUT);
 					// Add retransmission
+				}
+				
+				if ((*itr) -> state == FIN_WAIT_2_SOCKET){
+					cancelTimers((*itr), in_con -> send_isn);
+
 				}
 
 				free(in_con);
@@ -817,7 +863,9 @@ inline void TCPAssignment::sendTCPSegment(Connection *con, char* payload, int pa
 	
 	pck -> writeData(54, payload, payload_size);
 	construct_tcpheader(pck, con, flags, payload_size);
-	con -> not_acked_pckts.push_back(con -> send_isn);
+	if (std::find((con -> not_acked_pckts).begin(),(con -> not_acked_pckts).end(),  con -> send_isn) ==(con -> not_acked_pckts).end()){
+		con -> not_acked_pckts.push_back(con -> send_isn);
+	} 
 	con -> send_isn += payload_size;
 	Packet* pck_copy = this -> clonePacket(pck);
 	con -> timers_map.insert({con-> send_isn, {this -> addTimer((void*) new TimerCallbackFrame(TimerCallbackFrame::ACKTimeout, pck_copy), STANDARD_TIMEOUT), pck_copy}});
@@ -829,20 +877,38 @@ inline void TCPAssignment::sendRST(Connection *con){
 }
 
 void TCPAssignment::cancelTimers(Connection *con, uint64_t last){
-	// std::cout << "Canceling " << last << std::endl;
+	std::cout << "Canceling " << last << std::endl;
 	auto to_ack = &(con -> not_acked_pckts);
 	for (int i = 0; i < to_ack -> size(); i++){
 		std::cout << (*to_ack)[i] << std::endl; 
 	}
+	std::cout<<"0\n";
 	auto ack_itr = std::lower_bound(to_ack -> begin(), to_ack -> end(), last);
+	std::cout<<"0\n";
 	for (auto titr = to_ack -> begin(); titr != ack_itr; titr++){
+		std::cout<<"0\n";
+		std::cout<<*titr<<std::endl;
+		for(auto it = (con -> timers_map).cbegin(); it != (con -> timers_map).cend(); ++it)
+		{
+    		std::cout << it->first << " " << it->second.first << " " << it->second.second << "\n";
+		}
+		std::cout<<"0"<<std::endl;
+		
 		auto p = con -> timers_map[*titr];
+		std::cout<<"0"<<std::endl;
+		std::cout<<p.first<<"A"<< p.second<<std::endl;
 		this -> cancelTimer(p.first);
-		this -> freePacket(p.second);
+				std::cout<<"0"<<std::endl;
+		// this -> freePacket(p.second);
+		std::cout<<"0"<<std::endl;
+
 		con -> timers_map.erase(*titr);
-		// std::cout << p.first << " Canceled" << std::endl;
+		std::cout<<"0"<<std::endl;
+
+		std::cout << p.first << " Canceled" << std::endl;
 	}
 	to_ack -> erase(to_ack -> begin(), ack_itr);
+	std::cout<<"0\n";
 }
 
 
