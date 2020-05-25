@@ -233,12 +233,12 @@ public:
 
         uint32_t put(char *frombuffer, uint32_t cur_seq, uint32_t send_isn, uint32_t to_put){
             if (cur_seq == expected_seq_num){
-                // std::cout << "As Expected" << std::endl;
+                std::cout << "As Expected" <<std::hex<< cur_seq<< std::endl;
                 insert_inorder(cur_seq, send_isn, to_put, frombuffer);
                 check_ooo_packets();
             }
             else if (cur_seq > expected_seq_num){
-                // std::cout << "OOO" << std::endl;
+                std::cout << "OOO" << std::hex << "with seq" <<cur_seq <<" when expected " << expected_seq_num << std::endl;
                 insert_ooo(cur_seq, send_isn, to_put, frombuffer);
             }
             else {
@@ -246,6 +246,30 @@ public:
             }                
             // std::cout << cur_seq << " " << expected_seq_num << std::endl;
             return expected_seq_num;
+        }
+        uint32_t put(char *frombuffer, uint32_t cur_seq, uint32_t send_isn, uint32_t to_put, uint32_t upper_bound ){
+            if (cur_seq < upper_bound){
+                if (cur_seq == expected_seq_num){
+                std::cout << "As Expected" <<std::hex<< cur_seq<< std::endl;
+                insert_inorder(cur_seq, send_isn, to_put, frombuffer);
+                check_ooo_packets();
+                }
+                else if (cur_seq > expected_seq_num){
+                    std::cout << "OOO" << std::hex << "with seq" <<cur_seq <<" when expected " << expected_seq_num << std::endl;
+                    insert_ooo(cur_seq, send_isn, to_put, frombuffer);
+                }
+                else {
+                    // std::cout << "Prev" << std::endl;
+                }                
+                // std::cout << cur_seq << " " << expected_seq_num << std::endl;
+                return expected_seq_num;
+
+
+
+
+            }
+            return 0;
+           
         }
 
 };
@@ -317,7 +341,7 @@ public:
 	struct Connection{
         uint fd;
         in_addr_t local_ip, remote_ip;
-        uint32_t send_isn, recv_isn, backlog, backlog_used;
+        uint32_t send_isn, recv_isn, backlog, backlog_used, upper_data_bound;
         std::deque<std::tuple<UUID, int, void*>> *accept_queue;
         std::deque<Connection *> *estab_queue;
         socket_state state;
@@ -334,7 +358,7 @@ public:
         
 
         Connection(){
-            fd = local_ip = remote_ip = send_isn = recv_isn = local_port = remote_port = backlog = backlog_used = 0;
+            fd = local_ip = remote_ip = send_isn = recv_isn = local_port = remote_port = backlog = backlog_used = upper_data_bound = 0;
             recw = conw = 1;
             byte_in_flight = 0;
             uuid = timer_uuid = read_uuid = 0;
@@ -369,6 +393,7 @@ public:
             pid = other.pid;
             uuid = other.uuid;
             recw = other.recw;
+            upper_data_bound = other.upper_data_bound;
         }
     };
 

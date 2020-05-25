@@ -161,14 +161,14 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		//this->syscall_write(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
 		// std::cout << "write" << std::endl;
 		itr = find_by_fd(param.param1_int, pid);
-		buffer_ptr1 = (signed char*) param.param2_ptr;
-		for (int i =	0; i<param.param3_int; i++){
-			if(*buffer_ptr1==EOF)
-				std::cout<<i<<*buffer_ptr1<<" EOF\n";
-			buffer_ptr1++;			
-		}
+		// buffer_ptr1 = (signed char*) param.param2_ptr;
+		// for (int i =	0; i<param.param3_int; i++){
+		// 	if(*buffer_ptr1==EOF)
+		// 		std::cout<<i<<*buffer_ptr1<<" EOF\n";
+		// 	buffer_ptr1++;			
+		// }
 		
-			
+		
 
 		if ((*itr) -> write_buffer -> available() > 0){
 			temp_int = (*itr) -> write_buffer -> put((char*)param.param2_ptr, param.param3_int);
@@ -278,11 +278,11 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 			if ((*itr)->estab_queue -> size() > 0){
 				std::cout<<"isept_sys_call"<<std::endl;
 				std::cout<<"isept_sys_call"<<std::endl;
-
+				std::cout<<(*itr)->estab_queue -> size() <<std::endl;
 				(*itr) -> backlog_used--;
 				auto new_conn = (*itr) -> estab_queue -> front();
 				(*itr) -> estab_queue -> pop_front();
-
+				
 				if (new_conn -> state != ESTAB_SOCKET){
 					continue;
 				}
@@ -555,7 +555,11 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					this -> addTimer((void*)new TimerCallbackFrame(TimerCallbackFrame::TimedWait, (*itr), NULL, 0), 2 * STANDARD_TIMEOUT);
 				}
 
-				// close bef
+				// 2nd FIN-ACK
+				else if ((*itr) -> state == CLOSE_WAIT_SOCKET){
+					(*itr) -> recv_isn--;
+
+				} 
 
 				else /*if ((*itr) -> state == ESTAB_SOCKET)*/{
 
@@ -564,10 +568,23 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					}
 					cancelTimers((*itr), in_con -> send_isn + 1);
 					(*itr) -> state = CLOSE_WAIT_SOCKET;
+					(*itr) -> upper_data_bound = in_con ->recv_isn; // maybe insert to if cond above
 					if ((*itr) -> read_requested){
-						std::cout << "EOF" << std::endl;
-						returnSystemCall(std::get<0>((*itr) -> read_request), -1);
-						(*itr) -> read_requested = false;	
+						if ((*itr)->read_requested && (*itr) -> read_buffer -> inorder_bytes > 0){
+							uint to_read = std::get<2>((*itr)->read_request);
+							char* to_buffer = (char *) std::get<1>((*itr)->read_request);
+							uint32_t actual_get = (*itr) -> read_buffer -> get(to_buffer, to_read);
+							(*itr) -> read_requested = false;
+							returnSystemCall(std::get<0>((*itr)->read_request), actual_get);
+						}
+						else{
+							std::cout << "EOF" << std::endl;
+							returnSystemCall(std::get<0>((*itr) -> read_request), -1);
+							(*itr) -> read_requested = false;	
+
+
+						}
+						
 					}
 				}
 				(*itr) -> recv_isn++;
@@ -644,6 +661,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				if ((*itr) -> state == ESTAB_SOCKET){
 					// printPack(packet, flag_vector);
 					if (payload_size > 0){
+						std::cout<<"with payload"<<std::endl;
 						(*itr) -> recv_isn = (*itr) -> read_buffer -> put(payload, in_con -> recv_isn, in_con -> send_isn, payload_size);
 						if ((*itr)->read_requested && (*itr) -> read_buffer -> inorder_bytes > 0){
 							uint to_read = std::get<2>((*itr)->read_request);
@@ -683,8 +701,41 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					returnSystemCall((*itr)->uuid, 0 );
 				}
 
+				if ((*itr) -> state == CLOSE_WAIT_SOCKET){
+					if (payload_size > 0){
+						std::cout<<"(close Wait) with payload"<<std::endl;
+						(*itr) -> read_buffer -> put(payload, in_con -> recv_isn, in_con -> send_isn, payload_size, (*itr)->upper_data_bound);
+						if ((*itr)->read_requested && (*itr) -> read_buffer -> inorder_bytes > 0){
+							uint to_read = std::get<2>((*itr)->read_request);
+							char* to_buffer = (char *) std::get<1>((*itr)->read_request);
+							uint32_t actual_get = (*itr) -> read_buffer -> get(to_buffer, to_read);
+							(*itr) -> read_requested = false;
+							returnSystemCall(std::get<0>((*itr)->read_request), actual_get);
+						}
 
+						
+					}
+					sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
+					
+				}
 
+				if ((*itr) -> state == LAST_ACK_SOCKET){
+					if (payload_size > 0){
+						std::cout<<"(last ack Wait) with payload"<<std::endl;
+						(*itr) -> read_buffer -> put(payload, in_con -> recv_isn, in_con -> send_isn, payload_size, (*itr)->upper_data_bound);
+						if ((*itr)->read_requested && (*itr) -> read_buffer -> inorder_bytes > 0){
+							uint to_read = std::get<2>((*itr)->read_request);
+							char* to_buffer = (char *) std::get<1>((*itr)->read_request);
+							uint32_t actual_get = (*itr) -> read_buffer -> get(to_buffer, to_read);
+							(*itr) -> read_requested = false;
+							returnSystemCall(std::get<0>((*itr)->read_request), actual_get);
+						}
+
+						
+					}
+					sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
+					
+				}
 				if ((*itr) -> state == SYN_RCVD_SOCKET){
 					std::cout << "synrcvd" << std::endl;
 					cancelTimers((*itr), in_con->send_isn);
