@@ -430,6 +430,8 @@ public:
     inline void sendRST(Connection* con);
     void cancelTimers(Connection* con, uint64_t last);
 
+    // JUST
+    void performAccept(Connection *con, Connection* in_con);
     // Connection vector managment
 	void print_kensock_conns(std::vector<Connection*> con_v);
     Conn_itr find_by_fd(uint fd, int pid);
