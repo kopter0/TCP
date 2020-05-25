@@ -18,7 +18,7 @@
 namespace E
 {
 
-#define DEBUG
+// #define DEBUG
 
 TCPAssignment::TCPAssignment(Host* host) : HostModule("TCP", host),
 		NetworkModule(this->getHostModuleName(), host->getNetworkSystem()),
@@ -605,8 +605,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				}
 
 				else if ((*itr) -> state = SYN_RCVD_SOCKET){
-					performAccept((*itr), in_con);
+					// performAccept((*itr), in_con);
 					// (*itr) -> recv_isn++;
+
+					#ifdef DEBUG
+					std::cout << "FINACK TO SYNRCVD ARRIVED" << std::endl;
+					#endif // DEBUG
 				}
 				(*itr) -> recv_isn++;
 				sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
@@ -636,17 +640,17 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 			
 				
-				if ((*itr)->state == SYN_RCVD_SOCKET){
-					(*itr) -> send_isn--;			
-					sendTCPSegment((*itr), std::vector<FLAGS>{SYN, ACK});
-					(*itr) -> send_isn++;
-					return;	
-				}
+				// if ((*itr)->state == SYN_RCVD_SOCKET){
+				// 	(*itr) -> send_isn--;			
+				// 	sendTCPSegment((*itr), std::vector<FLAGS>{SYN, ACK});
+				// 	(*itr) -> send_isn++;
+				// 	return;	
+				// }
 
 			}	
 
 			else {
-				itr = find(in_con, LISTEN_SOCKET);
+				itr = find_by_port_ip(in_con, LISTEN_SOCKET);
 				if (itr != connection_vector.end()){
 					if (!(((*itr) -> backlog_used) < ((*itr) -> backlog))){
 						// sendRST(in_con);
@@ -660,8 +664,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					in_con -> recv_isn++;
 					in_con -> recw = recw;
 					connection_vector.push_back(in_con);
-					sendTCPSegment(in_con, std::vector<FLAGS>{SYN, ACK});
-					// sendTCPSegment(in_con, NULL, 0, std::vector<FLAGS>{SYN, ACK});
+					// sendTCPSegment(in_con, std::vector<FLAGS>{SYN, ACK});
+					sendTCPSegment(in_con, NULL, 0, std::vector<FLAGS>{SYN, ACK});
 					in_con -> send_isn++;
 				}
 
@@ -972,7 +976,7 @@ void TCPAssignment::performAccept(Connection* con, Connection *in_con){
 	// cancelTimers((*con), in_con->send_isn);
 	Connection *t_connection = con;
 	t_connection -> state = ESTAB_SOCKET;
-	// cancelTimers((*itr), in_con -> send_isn );
+	cancelTimers(t_connection, in_con -> send_isn );
 	std::vector<Connection*>::iterator itr = find_by_fd(t_connection -> fd, t_connection -> pid, LISTEN_SOCKET);
 	t_connection -> recw = 512;
 	t_connection -> recv_isn = in_con -> recv_isn;
@@ -999,9 +1003,15 @@ void TCPAssignment::performAccept(Connection* con, Connection *in_con){
 		// (*itr)->read_buffer->set_expected_seq_num((*itr)->recv_isn);
 		returnSystemCall((UUID)std::get<0>(tup), new_fd);
 
+		#ifdef DEBUG
+		std::cout << "Request handled" << std::endl;
+		#endif // DEBUG
+
 	}
 	else{
-
+		#ifdef DEBUG
+		std::cout << "Pushed to queue" << std::endl;
+		#endif // DEBUG
 		(*itr) -> estab_queue -> push_back(t_connection);
 		(*itr) -> backlog_used --;
 	}		
