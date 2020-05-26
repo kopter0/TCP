@@ -18,7 +18,7 @@
 namespace E
 {
 
-// #define DEBUG
+ #define DEBUG
 
 TCPAssignment::TCPAssignment(Host* host) : HostModule("TCP", host),
 		NetworkModule(this->getHostModuleName(), host->getNetworkSystem()),
@@ -634,7 +634,18 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				else if ((*itr) -> state = SYN_RCVD_SOCKET){
 					// performAccept((*itr), in_con);
 					// (*itr) -> recv_isn++;
+					// if 
+					// Simultaneous connect
+					cancelTimers((*itr),in_con -> send_isn+1);
+					(*itr)->state = CLOSE_WAIT_SOCKET;
+					returnSystemCall((*itr)->uuid, 0);
 
+					(*itr)-> recv_isn = in_con -> recv_isn + 1; 
+					(*itr) -> recw = recw;
+					(*itr) -> send_isn = in_con -> send_isn;
+					sendTCPSegment((*itr), std::vector<FLAGS>{ACK});	
+					return;
+				
 					#ifdef DEBUG
 					std::cout << "FINACK TO SYNRCVD ARRIVED" << std::endl;
 					#endif // DEBUG
