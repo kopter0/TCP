@@ -18,7 +18,7 @@
 namespace E
 {
 
- #define DEBUG
+//  #define DEBUG
 
 TCPAssignment::TCPAssignment(Host* host) : HostModule("TCP", host),
 		NetworkModule(this->getHostModuleName(), host->getNetworkSystem()),
@@ -590,7 +590,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				else if ((*itr) -> state == FIN_WAIT_2_SOCKET || (*itr) -> state == TIMED_WAIT_SOCKET) {
 					(*itr) -> state = TIMED_WAIT_SOCKET;
 					cancelTimers((*itr), in_con->send_isn);
-					this -> addTimer((void*)new TimerCallbackFrame(TimerCallbackFrame::TimedWait, (*itr), NULL, 0), 2 * STANDARD_TIMEOUT);
+					uint64_t tmp = getHost() -> getSystem() -> getCurrentTime();
+					this -> addTimer((void*)new TimerCallbackFrame(TimerCallbackFrame::TimedWait, (*itr), NULL, 0, tmp), 2 * (*itr) -> rto);
 				}
 
 				if ((*itr) -> state == CLOSE_WAIT_SOCKET){
@@ -632,7 +633,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				}
 
 				else if ((*itr) -> state = SYN_RCVD_SOCKET){
-					// performAccept((*itr), in_con);
+					performAccept((*itr), in_con);
 					// (*itr) -> recv_isn++;
 					// if 
 					// Simultaneous connect
@@ -706,8 +707,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					sendTCPSegment(in_con, NULL, 0, std::vector<FLAGS>{SYN, ACK});
 					in_con -> send_isn++;
 				}
-
-
 			}		
 		}
 		// ACK
@@ -719,9 +718,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			itr = find_by_lr_port_ip(in_con);
 			if (itr != connection_vector.end()){
 				if ((*itr) -> state == ESTAB_SOCKET){
-					// printPack(packet, flag_vector);
 					if (payload_size > 0){
-						std::cout<<"with payload"<<std::endl;
 						(*itr) -> recv_isn = (*itr) -> read_buffer -> put(payload, in_con -> recv_isn, in_con -> send_isn, payload_size);
 						if ((*itr)->read_requested && (*itr) -> read_buffer -> inorder_bytes > 0){
 							uint to_read = std::get<2>((*itr)->read_request);
@@ -735,12 +732,34 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					auto to_ack = &((*itr) -> not_acked_pckts);
 					if (to_ack -> size() > 0){
 						int acked = in_con -> send_isn;
+
+						if ((*itr) -> last_ack == acked){
+							(*itr) -> dup_ack_counter++;
+							if ((*itr) -> dup_ack_counter == 3){
+								#ifdef DEBUG
+								std::cout << std::endl << "Fast Retransmission" << std::endl;
+								#endif // DEBUG
+							}
+						}
+						else{
+							(*itr) -> congstate = ((*itr) -> congstate == FastRecovery) ? CongestionAvoidance : (*itr) -> congstate;
+							(*itr) -> last_ack = acked;
+							(*itr) -> dup_ack_counter = 0;
+						}
+
+						if ((*itr) -> congstate == SlowStart){
+							auto ack_itr = std::lower_bound(to_ack -> begin(), to_ack -> end(), acked);
+							(*itr) -> cwnd += MSS * (ack_itr - to_ack -> begin());
+						}
 						cancelTimers((*itr), acked);
-						auto ack_itr = std::lower_bound(to_ack -> begin(), to_ack -> end(), acked);
-						(*itr) -> max_allowed_packets += (ack_itr - to_ack -> begin());
-						to_ack -> erase(to_ack -> begin(), ack_itr);
-						// std::cout << "Acked: " << acked << " left: " << (*itr) -> not_acked_pckts.size() << std::endl;
+
 						if (to_ack -> size() == 0){
+							if ((*itr) -> congstate == CongestionAvoidance){
+								(*itr) -> cwnd += MSS;
+							}
+							if ((*itr) -> cwnd >= (*itr) -> sshtresh){
+
+							}
 							(*itr) -> timers_map.clear();
 							(*itr) -> byte_in_flight = 0;
 							do_write((*itr));
@@ -809,7 +828,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					(*itr) -> state = TIMED_WAIT_SOCKET;
 					cancelTimers((*itr), in_con -> send_isn);
 
-					this -> addTimer((void*)new TimerCallbackFrame(TimerCallbackFrame::TimedWait, (*itr), NULL, 0), 2 * STANDARD_TIMEOUT);
+					this -> addTimer((void*)new TimerCallbackFrame(TimerCallbackFrame::TimedWait, (*itr), NULL, 0, 0), 2 * (*itr) -> rto);
 					// Add retransmission
 				}
 				
@@ -838,12 +857,20 @@ void TCPAssignment::timerCallback(void *payload){
 			return;
 		}
 
+		Connection *con = (Connection*) info -> con;
+		con -> congstate = SlowStart;
+		con -> sshtresh = con -> cwnd / 2;
+		con -> cwnd = MSS;
+		con -> dup_ack_counter = 0;
+
+		// RESEND all???
+
 		char *buffer = (char*) info -> payload;
 
 		Packet* packet = this -> allocatePacket(info -> payload_size);
 		packet -> writeData(0, buffer, info -> payload_size);
 
-		this -> addTimer(payload, STANDARD_TIMEOUT);
+		this -> addTimer(payload, con -> rto);
 
 		#ifdef DEBUG
 		ushort flags;
@@ -979,8 +1006,8 @@ inline void TCPAssignment::sendTCPSegment(Connection *con, char* payload, int pa
 	
 	char *buffer = (char*) malloc(54 + payload_size);
 	pck -> readData(0, buffer, 54 + payload_size);
-	TimerCallbackFrame *tmp = new TimerCallbackFrame(TimerCallbackFrame::ACKTimeout, con, buffer, 54 + payload_size);
-	this -> addTimer((void*) tmp, STANDARD_TIMEOUT);
+	TimerCallbackFrame *tmp = new TimerCallbackFrame(TimerCallbackFrame::ACKTimeout, con, buffer, 54 + payload_size, getHost() -> getSystem() -> getCurrentTime());
+	this -> addTimer((void*) tmp, con -> rto);
 	con -> timers_map.insert({old_seq, (void*) tmp});
 	
 	
@@ -1003,6 +1030,9 @@ void TCPAssignment::cancelTimers(Connection *con, uint64_t last){
 	for (auto titr = to_ack -> begin(); titr != ack_itr; titr++){
 		TimerCallbackFrame* tmp = (TimerCallbackFrame*) con -> timers_map[*titr];
 		tmp -> self_destruct = true;
+
+		uint64_t rtt = getHost() -> getSystem() -> getCurrentTime() - tmp -> creation_time;
+		con -> updateRTO(rtt); 		
 	}
 	to_ack -> erase(to_ack -> begin(), ack_itr);
 }
@@ -1010,23 +1040,18 @@ void TCPAssignment::cancelTimers(Connection *con, uint64_t last){
 
 void TCPAssignment::do_write(Connection* con){
 	con -> write_in_process = true;
-	int total_sent = 0, total_size = 0;
 
 	while (con -> write_buffer -> get_size() > 0){
-		if ((con -> not_acked_pckts.size() < con -> max_allowed_packets) && (con -> byte_in_flight < con -> recw)){
-			// std::cout << con -> recw << " " << con -> max_allowed_packets << std::endl;
-			int to_fetch = std::min(512, 512);
-			char *payload = (char*)malloc(to_fetch);
-			int actual_size = con -> write_buffer -> get(payload, to_fetch);
-			sendTCPSegment(con, payload, actual_size, std::vector<FLAGS>{ACK});
-			free(payload);
-			con -> byte_in_flight += actual_size;
-			total_sent++;
-			total_size += actual_size;
-		}
-		else 
+		int to_fetch = std::min(con -> recw - con -> byte_in_flight, con -> cwnd - con -> byte_in_flight);
+		to_fetch = std::min(to_fetch, MSS);
+		if (!to_fetch)
 			break;
-	}
+		char *payload = (char*)malloc(to_fetch);
+		int actual_size = con -> write_buffer -> get(payload, to_fetch);
+		sendTCPSegment(con, payload, actual_size, std::vector<FLAGS>{ACK});
+		free(payload);
+		con -> byte_in_flight += actual_size;
+	}	
 	if (con -> write_requested){
 		int sysuuid = std::get<0>(con -> write_request);
 		char *ptr = (char*)std::get<1>(con -> write_request);
@@ -1100,22 +1125,6 @@ void TCPAssignment::performAccept(Connection* con, Connection *in_con){
 
 
 /*---------------------------------------------------------------------------------------------------*/
-char *states_socket[] =
-{
-    "CLOSED",
-        "LISTEN",
-        "SYN_SENT",
-        "SYN_RCVD",
-        "ESTAB",
-        //exit state send FIN
-        "FIN_WAIT_1",
-        "FIN_WAIT_2",
-        "CLOSING",
-        "TIME_WAIT",
-        //exit state FIN rcvd
-        "CLOSE_WAIT",
-        "LAST_ACK"
-};    
 
 Conn_itr TCPAssignment::find_by_fd(uint fd, int pid){		
     Conn_itr itr = connection_vector.begin();

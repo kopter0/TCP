@@ -42,6 +42,7 @@ public:
     #define OFFSET_PAYLOAD 54
     #define STANDARD_TIMEOUT 1e8
 	
+
 	enum FLAGS {SYN, ACK, FIN, RST};
     
 	enum socket_state{
@@ -59,6 +60,9 @@ public:
         CLOSE_WAIT_SOCKET,
         LAST_ACK_SOCKET
     };
+
+    enum congestion_state {SlowStart, CongestionAvoidance, FastRecovery};
+
     std::map<socket_state, std::string> socket_FSM ={
         {CLOSED_SOCKET, "CLOSEDs"},
         {LISTEN_SOCKET, "LISTENs"},
@@ -76,8 +80,10 @@ public:
     
     #define MAXBUFFERSIZE 51200 
     #define MAXSEQNUM 4294967296
+    #define MSS 512
     #define pv_itr std::vector<ReadBuffer::packet_info_rcvd>::iterator
     #define pb_pp std::vector<ReadBuffer::packet_info_rcvd>::push_back
+    
 
     class ReadBuffer{
         public:
@@ -233,12 +239,12 @@ public:
 
         uint32_t put(char *frombuffer, uint32_t cur_seq, uint32_t send_isn, uint32_t to_put){
             if (cur_seq == expected_seq_num){
-                std::cout << "As Expected" <<std::hex<< cur_seq<< std::endl;
+                // std::cout << "As Expected" <<std::hex<< cur_seq<< std::endl;
                 insert_inorder(cur_seq, send_isn, to_put, frombuffer);
                 check_ooo_packets();
             }
             else if (cur_seq > expected_seq_num){
-                std::cout << "OOO" << std::hex << "with seq" <<cur_seq <<" when expected " << expected_seq_num << std::endl;
+                // std::cout << "OOO" << std::hex << "with seq" <<cur_seq <<" when expected " << expected_seq_num << std::endl;
                 insert_ooo(cur_seq, send_isn, to_put, frombuffer);
             }
             else {
@@ -250,12 +256,12 @@ public:
         uint32_t put(char *frombuffer, uint32_t cur_seq, uint32_t send_isn, uint32_t to_put, uint32_t upper_bound ){
             if (cur_seq < upper_bound){
                 if (cur_seq == expected_seq_num){
-                std::cout << "As Expected" <<std::hex<< cur_seq<< std::endl;
+                // std::cout << "As Expected" <<std::hex<< cur_seq<< std::endl;
                 insert_inorder(cur_seq, send_isn, to_put, frombuffer);
                 check_ooo_packets();
                 }
                 else if (cur_seq > expected_seq_num){
-                    std::cout << "OOO" << std::hex << "with seq" <<cur_seq <<" when expected " << expected_seq_num << std::endl;
+                    // std::cout << "OOO" << std::hex << "with seq" <<cur_seq <<" when expected " << expected_seq_num << std::endl;
                     insert_ooo(cur_seq, send_isn, to_put, frombuffer);
                 }
                 else {
@@ -349,17 +355,25 @@ public:
         std::map<uint, void*> timers_map;
         std::vector<uint> not_acked_pckts;
         int pid, max_allowed_packets;
-        ushort recw, conw, byte_in_flight;
+        uint recw, byte_in_flight;
         in_port_t local_port, remote_port;
-        bool bound, write_requested, read_requested, close_requested ,write_in_process;
+        bool bound, write_requested, read_requested, close_requested, write_in_process;
         std::tuple<uint64_t, void*, int> write_request, read_request;
         MyBuffer *write_buffer; 
         ReadBuffer *read_buffer;
+
+        // Congestion variables
+        congestion_state congstate;
+        uint last_ack, dup_ack_counter, cwnd, sshtresh;
+        uint64_t rto, srtt, rttvar;
+        const float K = 4.0f, alpha = 0.125f, beta = 0.25f;
+        
+        
         
 
         Connection(){
             fd = local_ip = remote_ip = send_isn = recv_isn = local_port = remote_port = backlog = backlog_used = upper_data_bound = 0;
-            recw = conw = 1;
+            recw = 1;
             byte_in_flight = 0;
             uuid = timer_uuid = read_uuid = 0;
             max_allowed_packets = 1;
@@ -370,8 +384,23 @@ public:
             write_buffer = new MyBuffer();
             not_acked_pckts = std::vector<uint>();
             timers_map = std::map<uint, void*>();
+
+            congstate = SlowStart;  
+            last_ack = dup_ack_counter = 0;
+            cwnd = MSS;
+            sshtresh = 64000;
+
+            srtt = STANDARD_TIMEOUT;
+            rttvar = srtt / 2;
+            rto = srtt + K * rttvar;
         }
         ~Connection(){
+        }
+
+        void updateRTO(uint64_t rtt){
+            rttvar = (1 - beta) * rttvar + beta * llabs(srtt - rtt);
+            srtt = (1 - alpha) * srtt + alpha * rtt;
+            rto = srtt + K * rttvar;
         }
 
         friend bool operator<(const Connection & lhs, const Connection & rhs){
@@ -410,6 +439,7 @@ public:
         void *payload;
         int payload_size;
         bool self_destruct;
+        uint64_t creation_time;
 
         TimerCallbackFrame(){
             this -> timer_type = NONE;
@@ -417,12 +447,13 @@ public:
             this -> payload = NULL;
             this -> con = NULL;
         }
-        TimerCallbackFrame(TimerType type, void *con, void* payload, int payload_size){
+        TimerCallbackFrame(TimerType type, void *con, void* payload, int payload_size, uint64_t creation_time){
             this -> timer_type = type;
             this -> self_destruct = false;
             this -> payload = payload;
             this -> con = con;
             this -> payload_size = payload_size;
+            this -> creation_time = creation_time;
         }
     };
 
