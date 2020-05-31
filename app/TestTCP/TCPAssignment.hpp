@@ -392,7 +392,7 @@ public:
 
             srtt = STANDARD_TIMEOUT;
             rttvar = srtt / 2;
-            rto = srtt + K * rttvar;
+            rto = STANDARD_TIMEOUT;
         }
         ~Connection(){
         }
@@ -441,12 +441,14 @@ public:
         int payload_size;
         bool self_destruct;
         uint64_t creation_time;
+        int TTL;
 
         TimerCallbackFrame(){
             this -> timer_type = NONE;
             this -> self_destruct = false;
             this -> payload = NULL;
             this -> con = NULL;
+            this -> TTL = 20;
         }
         TimerCallbackFrame(TimerType type, void *con, void* payload, int payload_size, uint64_t creation_time){
             this -> timer_type = type;
@@ -455,6 +457,7 @@ public:
             this -> con = con;
             this -> payload_size = payload_size;
             this -> creation_time = creation_time;
+            this -> TTL = 20;
         }
     };
 
