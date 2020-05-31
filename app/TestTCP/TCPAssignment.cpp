@@ -138,6 +138,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 			sendTCPSegment((*itr), NULL, 0, std::vector<FLAGS>{FIN, ACK});
 			(*itr) -> state = LAST_ACK_SOCKET;
 			(*itr) -> uuid = syscallUUID;
+			// (*itr)-> fd = fd;
 			break;
 		}
 		else if ((*itr) -> state == CLOSED_SOCKET){
@@ -392,7 +393,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		//		static_cast<socklen_t*>(param.param3_ptr));
 		fd = param.param1_int;
 		sa = static_cast<struct sockaddr_in*> (param.param2_ptr);
-		itr = find_by_fd(fd, pid, ESTAB_SOCKET);
+		itr = find_by_fd(fd, pid);
 		if (itr != connection_vector.end()){
 						
 			sa -> sin_addr.s_addr = htonl((*itr) -> remote_ip); // maybe network
@@ -549,6 +550,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				}
 				
 				if ((*itr) -> state == SYN_RCVD_SOCKET){
+					cancelTimers((*itr), (*itr)-> send_isn);
 					(*itr)->state = ESTAB_SOCKET;
 					(*itr)->recv_isn = in_con->recv_isn + 1;
 					(*itr) -> send_isn++;
@@ -578,7 +580,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 		else if (flag_map[FIN] && flag_map[ACK]){
 			this -> freePacket(packet);
+			#ifdef DEBUG
+			std::cout<<"start"<<std::endl;
+			print_kensock_conns(connection_vector);
 
+			#endif // DEBUG
+			
 
 			itr = find_by_lr_port_ip(in_con);
 
@@ -594,7 +601,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					this -> addTimer((void*)new TimerCallbackFrame(TimerCallbackFrame::TimedWait, (*itr), NULL, 0, tmp), 2 * (*itr) -> rto);
 				}
 
-				if ((*itr) -> state == CLOSE_WAIT_SOCKET){
+				else if ((*itr) -> state == CLOSE_WAIT_SOCKET){
 					sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
 					return;
 				}
@@ -632,20 +639,32 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					
 				}
 
-				else if ((*itr) -> state = SYN_RCVD_SOCKET){
-					performAccept((*itr), in_con);
+				else if ((*itr) -> state == SYN_RCVD_SOCKET){
+					
 					// (*itr) -> recv_isn++;
 					// if 
 					// Simultaneous connect
-					cancelTimers((*itr),in_con -> send_isn+1);
-					(*itr)->state = CLOSE_WAIT_SOCKET;
-					returnSystemCall((*itr)->uuid, 0);
+					performAccept((*itr), in_con);
 
-					(*itr)-> recv_isn = in_con -> recv_isn + 1; 
-					(*itr) -> recw = recw;
-					(*itr) -> send_isn = in_con -> send_isn;
-					sendTCPSegment((*itr), std::vector<FLAGS>{ACK});	
-					return;
+					// cancelTimers((*itr),in_con -> send_isn+1);
+					// (*itr)->state = CLOSE_WAIT_SOCKET;
+					// returnSystemCall((*itr)->uuid, 0);
+					if ((*itr)->sim_connect){
+						cancelTimers((*itr),in_con -> send_isn+1);
+						(*itr)->state = CLOSE_WAIT_SOCKET;
+						(*itr)-> recv_isn = in_con -> recv_isn + 1; 
+						(*itr) -> recw = recw;
+						(*itr) -> send_isn = in_con -> send_isn;
+						sendTCPSegment((*itr), std::vector<FLAGS>{ACK});	
+						returnSystemCall((*itr)->uuid, 0);
+						return;
+						
+					}
+					// (*itr)-> recv_isn = in_con -> recv_isn + 1; 
+					// (*itr) -> recw = recw;
+					// (*itr) -> send_isn = in_con -> send_isn;
+					// sendTCPSegment((*itr), std::vector<FLAGS>{ACK});	
+					// return;
 				
 					#ifdef DEBUG
 					std::cout << "FINACK TO SYNRCVD ARRIVED" << std::endl;
@@ -655,6 +674,14 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
 				// (*itr) -> send_isn++;
 				free(in_con);
+				#ifdef DEBUG
+				std::cout<<"end"<<std::endl;
+
+				print_kensock_conns(connection_vector);
+				
+				#endif // DEBUG
+				
+
 			}
 		}
 
@@ -671,7 +698,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					(*itr) -> state = SYN_RCVD_SOCKET;
 					(*itr) -> recv_isn = in_con -> recv_isn + 1;
 					(*itr) -> send_isn--;
-					//(*itr) -> sim_connect = true; 			
+					(*itr) -> sim_connect = true; 			
 					sendTCPSegment((*itr), NULL, 0, std::vector<FLAGS>{SYN, ACK});
 					return;	
 				}
@@ -714,7 +741,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		{
 			// std::cout << "ACK Packet" << std::endl;
 			// sim connect
+			#ifdef DEBUG
+			std::cout<<"start"<<std::endl;
+			print_kensock_conns(connection_vector);
 
+			#endif // DEBUG
+			
 			itr = find_by_lr_port_ip(in_con);
 			if (itr != connection_vector.end()){
 				if ((*itr) -> state == ESTAB_SOCKET){
@@ -772,13 +804,13 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				
 				
 
-				if ((*itr) -> state == LAST_ACK_SOCKET){
-					cancelTimers((*itr), in_con->send_isn);
-					std::cout << "LASt" << std::endl;
-					uint64_t uuid_temp = (*itr)->uuid;
-					connection_vector.erase(itr);
-					returnSystemCall((*itr)->uuid, 0 );
-				}
+				// if ((*itr) -> state == LAST_ACK_SOCKET){
+				// 	cancelTimers((*itr), in_con->send_isn);
+				// 	std::cout << "LASt" << std::endl;
+				// 	uint64_t uuid_temp = (*itr)->uuid;
+				// 	connection_vector.erase(itr);
+				// 	returnSystemCall((*itr)->uuid, 0 );
+				// }
 
 				if ((*itr) -> state == CLOSE_WAIT_SOCKET){
 					if (payload_size > 0){
@@ -799,6 +831,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				}
 
 				if ((*itr) -> state == LAST_ACK_SOCKET){
+					cancelTimers((*itr), (in_con)->send_isn + 1);
 					if (payload_size > 0){
 						std::cout<<"(last ack Wait) with payload"<<std::endl;
 						(*itr) -> read_buffer -> put(payload, in_con -> recv_isn, in_con -> send_isn, payload_size, (*itr)->upper_data_bound);
@@ -809,10 +842,16 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 							(*itr) -> read_requested = false;
 							returnSystemCall(std::get<0>((*itr)->read_request), actual_get);
 						}
+						sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
 
 						
 					}
-					sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
+					else{
+						// removeFileDescriptor((*itr)->pid, (*itr)->fd);
+						returnSystemCall((*itr)->uuid, 0);
+						connection_vector.erase(itr);
+
+					}
 					
 				}
 				if ((*itr) -> state == SYN_RCVD_SOCKET){
@@ -826,7 +865,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				}
 				if ((*itr) -> state == CLOSING_SOCKET){
 					(*itr) -> state = TIMED_WAIT_SOCKET;
-					cancelTimers((*itr), in_con -> send_isn);
+					cancelTimers((*itr), in_con -> send_isn + 1	);
 
 					this -> addTimer((void*)new TimerCallbackFrame(TimerCallbackFrame::TimedWait, (*itr), NULL, 0, 0), 2 * (*itr) -> rto);
 					// Add retransmission
@@ -841,6 +880,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			}
 			
 			this -> freePacket(packet);
+			#ifdef DEBUG
+			print_kensock_conns(connection_vector);
+			std::cout<<"end"<<std::endl;
+
+			#endif // DEBUG
+			
 		}
 		// std::cout << "Sent" << std::endl;
 	}
@@ -884,6 +929,7 @@ void TCPAssignment::timerCallback(void *payload){
 
 	if (info -> timer_type == TimerCallbackFrame::TimedWait){
 		Connection* con = (Connection*) info -> con;
+		cancelTimers(con, con-> send_isn +1 );
 		con -> state = CLOSED_SOCKET;
 		returnSystemCall(con -> uuid, 0);
 	}
@@ -1029,12 +1075,25 @@ void TCPAssignment::cancelTimers(Connection *con, uint64_t last){
 	auto ack_itr = std::upper_bound(to_ack -> begin(), to_ack -> end(), last);
 	for (auto titr = to_ack -> begin(); titr != ack_itr; titr++){
 		TimerCallbackFrame* tmp = (TimerCallbackFrame*) con -> timers_map[*titr];
+		#ifdef DEBUG
+		std::cout <<tmp->self_destruct<<std::endl;
+		std::cout<<"Timer cancel: "<<std::hex<<*titr<<std::endl;
+		std::cout <<tmp->self_destruct<<std::endl;
+		#endif // DEBUG
 		tmp -> self_destruct = true;
 
 		uint64_t rtt = getHost() -> getSystem() -> getCurrentTime() - tmp -> creation_time;
 		con -> updateRTO(rtt); 		
 	}
+
+	#ifdef DEBUG
+	std::cout << to_ack -> size() << " ";
+	#endif // DEGUG
 	to_ack -> erase(to_ack -> begin(), ack_itr);
+	
+	#ifdef DEBUG
+	std::cout << to_ack -> size() << std::endl;
+	#endif // DEGUG
 }
 
 

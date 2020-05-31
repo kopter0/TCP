@@ -357,7 +357,7 @@ public:
         int pid, max_allowed_packets;
         uint recw, byte_in_flight;
         in_port_t local_port, remote_port;
-        bool bound, write_requested, read_requested, close_requested, write_in_process;
+        bool bound, write_requested, read_requested, close_requested ,write_in_process, sim_connect;
         std::tuple<uint64_t, void*, int> write_request, read_request;
         MyBuffer *write_buffer; 
         ReadBuffer *read_buffer;
@@ -379,7 +379,7 @@ public:
             max_allowed_packets = 1;
 			pid = -1;
             state = CLOSED_SOCKET;  
-            bound = write_requested = read_requested = write_in_process = false;
+            bound = write_requested = read_requested = write_in_process =sim_connect= false;
             read_buffer = new ReadBuffer();
             write_buffer = new MyBuffer();
             not_acked_pckts = std::vector<uint>();
@@ -423,6 +423,7 @@ public:
             uuid = other.uuid;
             recw = other.recw;
             upper_data_bound = other.upper_data_bound;
+            sim_connect = other.sim_connect;
         }
     };
 
