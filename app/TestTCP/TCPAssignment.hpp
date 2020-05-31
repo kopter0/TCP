@@ -233,12 +233,12 @@ public:
 
         uint32_t put(char *frombuffer, uint32_t cur_seq, uint32_t send_isn, uint32_t to_put){
             if (cur_seq == expected_seq_num){
-                std::cout << "As Expected" <<std::hex<< cur_seq<< std::endl;
+                // std::cout << "As Expected" <<std::hex<< cur_seq<< std::endl;
                 insert_inorder(cur_seq, send_isn, to_put, frombuffer);
                 check_ooo_packets();
             }
             else if (cur_seq > expected_seq_num){
-                std::cout << "OOO" << std::hex << "with seq" <<cur_seq <<" when expected " << expected_seq_num << std::endl;
+                // std::cout << "OOO" << std::hex << "with seq" <<cur_seq <<" when expected " << expected_seq_num << std::endl;
                 insert_ooo(cur_seq, send_isn, to_put, frombuffer);
             }
             else {
@@ -250,12 +250,12 @@ public:
         uint32_t put(char *frombuffer, uint32_t cur_seq, uint32_t send_isn, uint32_t to_put, uint32_t upper_bound ){
             if (cur_seq < upper_bound){
                 if (cur_seq == expected_seq_num){
-                std::cout << "As Expected" <<std::hex<< cur_seq<< std::endl;
+                // std::cout << "As Expected" <<std::hex<< cur_seq<< std::endl;
                 insert_inorder(cur_seq, send_isn, to_put, frombuffer);
                 check_ooo_packets();
                 }
                 else if (cur_seq > expected_seq_num){
-                    std::cout << "OOO" << std::hex << "with seq" <<cur_seq <<" when expected " << expected_seq_num << std::endl;
+                    // std::cout << "OOO" << std::hex << "with seq" <<cur_seq <<" when expected " << expected_seq_num << std::endl;
                     insert_ooo(cur_seq, send_isn, to_put, frombuffer);
                 }
                 else {
@@ -351,7 +351,7 @@ public:
         int pid, max_allowed_packets;
         ushort recw, conw, byte_in_flight;
         in_port_t local_port, remote_port;
-        bool bound, write_requested, read_requested, close_requested ,write_in_process;
+        bool bound, write_requested, read_requested, close_requested ,write_in_process, sim_connect;
         std::tuple<uint64_t, void*, int> write_request, read_request;
         MyBuffer *write_buffer; 
         ReadBuffer *read_buffer;
@@ -365,7 +365,7 @@ public:
             max_allowed_packets = 1;
 			pid = -1;
             state = CLOSED_SOCKET;  
-            bound = write_requested = read_requested = write_in_process = false;
+            bound = write_requested = read_requested = write_in_process =sim_connect= false;
             read_buffer = new ReadBuffer();
             write_buffer = new MyBuffer();
             not_acked_pckts = std::vector<uint>();
@@ -394,6 +394,7 @@ public:
             uuid = other.uuid;
             recw = other.recw;
             upper_data_bound = other.upper_data_bound;
+            sim_connect = other.sim_connect;
         }
     };
 
