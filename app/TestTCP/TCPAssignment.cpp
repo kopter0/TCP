@@ -542,6 +542,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					(*itr) -> send_isn++;
 					(*itr) -> recw = recw;
 					sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
+					returnSystemCall((*itr) -> uuid, 0);
 				}
 
 				else if ((*itr) -> state == SYN_SENT_SOCKET){
@@ -578,6 +579,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			if (itr != connection_vector.end()){
 				if ((*itr) -> state == FIN_WAIT_1_SOCKET){
 					(*itr) -> state = CLOSING_SOCKET;
+					sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
+					return;
 				}
 
 				else if ((*itr) -> state == FIN_WAIT_2_SOCKET || (*itr) -> state == TIMED_WAIT_SOCKET) {
@@ -588,6 +591,11 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				}
 
 				else if ((*itr) -> state == CLOSE_WAIT_SOCKET){
+					sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
+					return;
+				}
+
+				else if ((*itr) -> state == CLOSING_SOCKET){
 					sendTCPSegment((*itr), std::vector<FLAGS>{ACK});
 					return;
 				}
@@ -651,7 +659,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 			if(itr != connection_vector.end()){
 				if ((*itr) -> state == SYN_SENT_SOCKET){
-					cancelTimers((*itr), in_con -> send_isn);
+
+					#ifdef DEBUG
+					std::cout << "SimConnect Initiated" << std::endl;
+					#endif // DEBUG
+
+					cancelTimers((*itr), (*itr) -> send_isn);
 					(*itr) -> state = SYN_RCVD_SOCKET;
 					(*itr) -> recv_isn = in_con -> recv_isn + 1;
 					(*itr) -> send_isn--;
@@ -815,12 +828,15 @@ void TCPAssignment::timerCallback(void *payload){
 	TimerCallbackFrame *info = (TimerCallbackFrame*)payload;
 	if (info -> timer_type == TimerCallbackFrame::ACKTimeout){
 
-		if (info -> self_destruct || info -> TTL <= 0){
+		if (info -> self_destruct){
 			free(info -> payload);
 			free(info);
 			return;
 		}
 		info -> TTL--;
+		if (info -> TTL == 0){
+			info -> self_destruct = true;
+		}
 		Connection *con = (Connection*) info -> con;
 		con -> congstate = SlowStart;
 		con -> sshtresh = con -> cwnd / 2;
@@ -988,13 +1004,18 @@ inline void TCPAssignment::sendRST(Connection *con){
 void TCPAssignment::cancelTimers(Connection *con, uint64_t last){
 	auto to_ack = &(con -> not_acked_pckts);
 	auto ack_itr = std::upper_bound(to_ack -> begin(), to_ack -> end(), last);
+	std::vector<uint> to_erase;
 	for (auto titr = to_ack -> begin(); titr != ack_itr; titr++){
 		TimerCallbackFrame* tmp = (TimerCallbackFrame*) con -> timers_map[*titr];
 		tmp -> self_destruct = true;
 
+		to_erase.push_back(*titr);
+
 		uint64_t rtt = getHost() -> getSystem() -> getCurrentTime() - tmp -> creation_time;
 		con -> updateRTO(rtt); 		
 	}
+	for (uint i = 0; i < to_erase.size(); i++)
+		con -> timers_map.erase(to_erase[i]);
 	to_ack -> erase(to_ack -> begin(), ack_itr);
 }
 
