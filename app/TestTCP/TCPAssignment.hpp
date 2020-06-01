@@ -368,6 +368,9 @@ public:
         uint64_t rto, srtt, rttvar;
         const float K = 4.0f, alpha = 0.125f, beta = 0.25f;
         
+
+        // Debug 
+        uint isn;
         
         
 
@@ -488,7 +491,7 @@ public:
     inline void sendTCPSegment(Connection *con, std::vector<FLAGS> flags);
     inline void sendTCPSegment(Connection *con, char *payload, int payload_size, std::vector<FLAGS> flags);
     inline void sendRST(Connection* con);
-    void cancelTimers(Connection* con, uint64_t last);
+    int cancelTimers(Connection* con, uint64_t last);
 
     // JUST
     void performAccept(Connection *con, Connection* in_con);

@@ -255,6 +255,10 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		sendTCPSegment((*itr), NULL, 0, std::vector<FLAGS>{SYN});
 
 		(*itr) -> send_isn++;
+
+		#ifdef DEBUG
+		(*itr) -> isn = (*itr) -> send_isn - 1;
+		#endif // DEBUG
 		break;
 	case LISTEN:
 		//this->syscall_listen(syscallUUID, pid, param.param1_int, param.param2_int);
@@ -691,6 +695,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					// sendTCPSegment(in_con, std::vector<FLAGS>{SYN, ACK});
 					sendTCPSegment(in_con, NULL, 0, std::vector<FLAGS>{SYN, ACK});
 					in_con -> send_isn++;
+
+					#ifdef DEBUG
+					(*itr) -> isn = (*itr) -> send_isn - 1;
+					#endif // DEBUG
 				}
 			}		
 		}
@@ -715,6 +723,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					if (to_ack -> size() > 0){
 						uint acked = in_con -> send_isn;
 
+						#ifdef DEBUG
+						printf("Acked: %d\n", acked - (*itr) -> isn);
+						#endif // DEBUG
+
 						if ((*itr) -> last_ack == acked){
 							(*itr) -> dup_ack_counter++;
 							if ((*itr) -> dup_ack_counter == 3){
@@ -728,15 +740,14 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 							(*itr) -> last_ack = acked;
 							(*itr) -> dup_ack_counter = 0;
 						}
+						int canceled = cancelTimers((*itr), acked);
 
 						if ((*itr) -> congstate == SlowStart){
-							auto ack_itr = std::lower_bound(to_ack -> begin(), to_ack -> end(), acked);
-							(*itr) -> cwnd += MSS * (ack_itr - to_ack -> begin());
+							(*itr) -> cwnd += MSS * canceled;
 							#ifdef DEBUG
-							std::cout << "SlowStart new ACK: +" << (ack_itr - to_ack -> begin()) << "MSS" << std::endl;
+							std::cout << "SlowStart new ACK: +" << canceled << " MSS" << std::endl;
 							#endif // 
 						}
-						cancelTimers((*itr), acked);
 
 						if (to_ack -> size() == 0){
 							if ((*itr) -> congstate == CongestionAvoidance){
@@ -1029,7 +1040,8 @@ inline void TCPAssignment::sendRST(Connection *con){
 	sendTCPSegment(con, std::vector<FLAGS>{RST});
 }
 
-void TCPAssignment::cancelTimers(Connection *con, uint64_t last){
+int TCPAssignment::cancelTimers(Connection *con, uint64_t last){
+	int res = 0;
 	auto to_ack = &(con -> not_acked_pckts);
 	auto ack_itr = std::upper_bound(to_ack -> begin(), to_ack -> end(), last);
 	std::vector<uint> to_erase;
@@ -1041,10 +1053,13 @@ void TCPAssignment::cancelTimers(Connection *con, uint64_t last){
 
 		uint64_t rtt = getHost() -> getSystem() -> getCurrentTime() - tmp -> creation_time;
 		con -> updateRTO(rtt); 		
+
+		res++;
 	}
 	for (uint i = 0; i < to_erase.size(); i++)
 		con -> timers_map.erase(to_erase[i]);
 	to_ack -> erase(to_ack -> begin(), ack_itr);
+	return res;
 }
 
 
@@ -1072,6 +1087,12 @@ void TCPAssignment::do_write(Connection* con){
 	}
 	#ifdef DEBUG
 	std::cout << "Sent: " << total << std::endl;
+
+	for (uint i = 0; i < con -> not_acked_pckts.size(); i++){
+		printf("%d ", con -> not_acked_pckts[i] - con -> isn);
+	}
+	std::cout << std::endl;
+
 	#endif // DEBUG
 	if (con -> write_requested){
 		int sysuuid = std::get<0>(con -> write_request);
