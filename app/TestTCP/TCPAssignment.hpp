@@ -493,6 +493,8 @@ public:
     inline void sendRST(Connection* con);
     int cancelTimers(Connection* con, uint64_t last);
 
+    void fastRetransmit(Connection* con);
+
     // JUST
     void performAccept(Connection *con, Connection* in_con);
     // Connection vector managment

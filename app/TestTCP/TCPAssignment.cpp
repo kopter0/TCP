@@ -724,18 +724,27 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 						uint acked = in_con -> send_isn;
 
 						#ifdef DEBUG
-						printf("Acked: %d\n", acked - (*itr) -> isn);
+						printf("Acked: %d...", acked - (*itr) -> isn);
 						#endif // DEBUG
 
 						if ((*itr) -> last_ack == acked){
 							(*itr) -> dup_ack_counter++;
 							if ((*itr) -> dup_ack_counter == 3){
+								(*itr) -> sshtresh = (*itr) -> cwnd / 2;
+								(*itr) -> cwnd = (*itr) -> sshtresh + 3 * 512; 
+								
 								#ifdef DEBUG
 								std::cout << std::endl << "Fast Retransmission" << std::endl;
 								#endif // PART2_DEBUG
+								
+								fastRetransmit(*itr);
+								(*itr) -> congstate = CongestionAvoidance;								
 							}
 						}
 						else{
+							#ifdef DEBUG
+							std::cout << (*itr) -> congstate << std::endl;
+							#endif // DEBUG
 							(*itr) -> congstate = ((*itr) -> congstate == FastRecovery) ? CongestionAvoidance : (*itr) -> congstate;
 							(*itr) -> last_ack = acked;
 							(*itr) -> dup_ack_counter = 0;
@@ -873,14 +882,14 @@ void TCPAssignment::timerCallback(void *payload){
 		}
 
 		Connection *con = (Connection*) info -> con;
-		if (con -> state == ESTAB_SOCKET){
+		if (con -> state == ESTAB_SOCKET && con -> congstate != FastRecovery){
 			con -> congstate = SlowStart;
 			con -> sshtresh = con -> cwnd / 2;
 			con -> cwnd = MSS;
 			con -> dup_ack_counter = 0;
+			con -> congstate = FastRecovery;
 		}
 
-		// RESEND all???
 
 		char *buffer = (char*) info -> payload;
 
@@ -1163,6 +1172,20 @@ void TCPAssignment::performAccept(Connection* con, Connection *in_con){
 	}		
 }
 
+
+void TCPAssignment::fastRetransmit(Connection* con){
+	std::vector<uint> tmp_vec(con -> not_acked_pckts);
+	con -> send_isn = tmp_vec[0];
+	con -> not_acked_pckts.clear();
+	for (uint a: tmp_vec){
+		auto tmp = (TimerCallbackFrame*)con -> timers_map[a];
+		con -> timers_map.erase(a);
+		tmp -> self_destruct = true;
+		char* start = (char*) tmp -> payload;
+		start += 54;
+		sendTCPSegment(con, start, (tmp -> payload_size - 54), std::vector<FLAGS>{ACK});
+	}
+}
 
 
 
