@@ -756,6 +756,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 						}
 
 						if ((*itr) -> byte_in_flight < (*itr) -> cwnd / 2){
+							(*itr) -> cwnd +=  MSS / 2;
 							do_write((*itr));
 						}
 
@@ -1032,13 +1033,13 @@ inline void TCPAssignment::sendTCPSegment(Connection *con, char* payload, int pa
 	construct_tcpheader(pck, con, flags, payload_size);
 	uint old_seq = con -> send_isn;
 	con -> send_isn += payload_size;
-	con -> not_acked_pckts.push_back(old_seq);
+	con -> not_acked_pckts.push_back(old_seq + 1);
 	
 	char *buffer = (char*) malloc(54 + payload_size);
 	pck -> readData(0, buffer, 54 + payload_size);
 	TimerCallbackFrame *tmp = new TimerCallbackFrame(TimerCallbackFrame::ACKTimeout, con, buffer, 54 + payload_size, getHost() -> getSystem() -> getCurrentTime());
 	this -> addTimer((void*) tmp, con -> rto);
-	con -> timers_map.insert({old_seq, (void*) tmp});
+	con -> timers_map.insert({old_seq + 1, (void*) tmp});
 	
 	
 	#ifdef PART2_DEBUG
@@ -1181,8 +1182,15 @@ void TCPAssignment::performAccept(Connection* con, Connection *in_con){
 
 
 void TCPAssignment::fastRetransmit(Connection* con){
+
+	#ifdef DEBUG
+	uint first = con ->not_acked_pckts[0] - con -> isn;
+	uint last = con -> not_acked_pckts[con -> not_acked_pckts.size() - 1] - con -> isn;
+	std::cout << "First: " << first << "Last: " << last << std::endl;
+	#endif // DEBUG
+
 	std::vector<uint> tmp_vec(con -> not_acked_pckts);
-	con -> send_isn = tmp_vec[0];
+	con -> send_isn = tmp_vec[0] - 1;
 	con -> not_acked_pckts.clear();
 	for (uint a: tmp_vec){
 		auto tmp = (TimerCallbackFrame*)con -> timers_map[a];
