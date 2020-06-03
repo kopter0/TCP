@@ -403,7 +403,7 @@ public:
         void updateRTO(uint64_t rtt){
             rttvar = (1 - beta) * rttvar + beta * llabs(srtt - rtt);
             srtt = (1 - alpha) * srtt + alpha * rtt;
-            rto = srtt + K * rttvar;
+            rto = 1.5f * srtt + K * rttvar;
         }
 
         friend bool operator<(const Connection & lhs, const Connection & rhs){

@@ -19,7 +19,7 @@ namespace E
 {
 
 // #define PART2_DEBUG
-#define DEBUG
+// #define DEBUG
 
 TCPAssignment::TCPAssignment(Host* host) : HostModule("TCP", host),
 		NetworkModule(this->getHostModuleName(), host->getNetworkSystem()),
@@ -724,7 +724,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 						uint acked = in_con -> send_isn;
 
 						#ifdef DEBUG
-						printf("Acked: %d...", acked - (*itr) -> isn);
+						printf("Acked: %d...%d\n", acked - (*itr) -> isn, (*itr) -> congstate);
 						#endif // DEBUG
 
 						if ((*itr) -> last_ack == acked){
@@ -742,9 +742,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 							}
 						}
 						else{
-							#ifdef DEBUG
-							std::cout << (*itr) -> congstate << std::endl;
-							#endif // DEBUG
 							(*itr) -> congstate = ((*itr) -> congstate == FastRecovery) ? CongestionAvoidance : (*itr) -> congstate;
 							(*itr) -> last_ack = acked;
 							(*itr) -> dup_ack_counter = 0;
@@ -756,6 +753,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 							#ifdef DEBUG
 							std::cout << "SlowStart new ACK: +" << canceled << " MSS" << std::endl;
 							#endif // 
+						}
+
+						if ((*itr) -> byte_in_flight < (*itr) -> cwnd / 2){
+							do_write((*itr));
 						}
 
 						if (to_ack -> size() == 0){
@@ -779,7 +780,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 							#endif // DEBUG
 							
 							(*itr) -> timers_map.clear();
-							(*itr) -> byte_in_flight = 0;
+							// (*itr) -> byte_in_flight = 0;
 							do_write((*itr));
 						}
 					}
@@ -888,6 +889,10 @@ void TCPAssignment::timerCallback(void *payload){
 			con -> cwnd = MSS;
 			con -> dup_ack_counter = 0;
 			con -> congstate = FastRecovery;
+
+			#ifdef DEBUG
+			std::cout << "Timeouted...transition to fastrecovery" << std::endl;
+			#endif // DEBUG
 		}
 
 
@@ -1057,6 +1062,8 @@ int TCPAssignment::cancelTimers(Connection *con, uint64_t last){
 	for (auto titr = to_ack -> begin(); titr != ack_itr; titr++){
 		TimerCallbackFrame* tmp = (TimerCallbackFrame*) con -> timers_map[*titr];
 		tmp -> self_destruct = true;
+
+		con -> byte_in_flight -= (tmp -> payload_size - 54);
 
 		to_erase.push_back(*titr);
 
